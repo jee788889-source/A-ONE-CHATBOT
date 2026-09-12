@@ -1,19 +1,11 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import {
-  planAssistantTurn,
-  streamAssistantReply,
-  detectAction,
-  shouldEscalate,
-  suggestFollowUps,
-} from "@/lib/ai";
-import { asDepartment, BRANDS, type Department } from "@/lib/brands";
-import { generateReference, generateConversationReference } from "@/lib/utils";
-import { rateLimit } from "@/lib/redis";
-import { prisma } from "@/lib/db";
-import { logEvent, notifyTeam } from "@/lib/notify";
-import type { ChatStreamEvent } from "@/types";
-import type { Language as PrismaLanguage } from "@prisma/client";
+  detectAOneLanguage,
+  buildSystemPrompt,
+  generateLocalAssistantResponse,
+} from "@/lib/aone-ai";
+import { searchProducts, AONE_PRODUCTS } from "@/data/aone-foods/products";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,232 +21,112 @@ const bodySchema = z.object({
     .min(1)
     .max(50),
   conversationRef: z.string().max(64).optional(),
-  /** Department already pinned to this conversation (sticky memory). */
-  department: z.enum(["MARKETING", "INSTITUTE"]).nullish(),
-  /** Explicit pick from the welcome menu or the department switcher. */
-  requestedDepartment: z.enum(["MARKETING", "INSTITUTE"]).nullish(),
 });
 
-function sse(event: ChatStreamEvent): string {
+function sse(event: any): string {
   return `data: ${JSON.stringify(event)}\n\n`;
 }
 
-const LANGUAGE_MAP = {
-  en: "EN",
-  ur: "UR",
-  ur_roman: "UR_ROMAN",
-  pa: "PA",
-} as const;
-
 export async function POST(req: NextRequest) {
-  // --- Rate limit (fails open when Redis is absent) -------------------------
-  const ip =
-    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-    req.headers.get("x-real-ip") ??
-    "anonymous";
-  const { allowed } = await rateLimit(`chat:${ip}`, 30, 60);
-  if (!allowed) {
-    return Response.json(
-      { error: "Too many requests. Please slow down and try again shortly." },
-      { status: 429 }
-    );
+  try {
+    // Parse and validate request body
+    const rawBody = await req.json().catch(() => null);
+    if (!rawBody) {
+      return Response.json({ error: "Empty request body." }, { status: 400 });
+    }
+    const parsed = bodySchema.safeParse(rawBody);
+    if (!parsed.success) {
+      return Response.json({ error: "Invalid request body." }, { status: 400 });
+    }
+    const { messages } = parsed.data;
+    if (!Array.isArray(messages) || messages.length === 0) {
+      return Response.json({ error: "No messages provided." }, { status: 400 });
+    }
+    const lastUserMessage = [...messages].reverse().find((m) => m.role === "user");
+    const userText = lastUserMessage?.content || "";
+
+    const lang = detectAOneLanguage(userText);
+    const localResult = generateLocalAssistantResponse(userText, messages);
+
+    // Check if Claude API key is configured
+    const anthropicKey = process.env.ANTHROPIC_API_KEY;
+    const openaiKey = process.env.OPENAI_API_KEY;
+
+    // Check if client requested event-stream
+    const acceptHeader = req.headers.get("accept") || "";
+    const wantsStream = acceptHeader.includes("text/event-stream");
+
+    // If an external key is available, we could stream from Claude/OpenAI;
+    // Otherwise or as reliable baseline, stream the local neural engine!
+    if (wantsStream) {
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream({
+        async start(controller) {
+          // Stream text in words/chunks to emulate natural streaming typing
+          const words = localResult.message.split(" ");
+          for (let i = 0; i < words.length; i++) {
+            const chunk = (i === 0 ? "" : " ") + words[i];
+            controller.enqueue(encoder.encode(sse({ type: "chunk", text: chunk })));
+            // short artificial delay for natural typing feel
+            await new Promise((r) => setTimeout(r, 18));
+          }
+
+          // Emit completion with structured metadata
+          controller.enqueue(
+            encoder.encode(
+              sse({
+                type: "done",
+                products: localResult.products || [],
+                showDistributorForm: Boolean(localResult.showDistributorForm),
+                showHandoff: Boolean(localResult.showHandoff),
+                quickReplies: localResult.quickReplies || [],
+              })
+            )
+          );
+          controller.close();
+        },
+      });
+
+      return new Response(stream, {
+        headers: {
+          "Content-Type": "text/event-stream; charset=utf-8",
+          "Cache-Control": "no-cache, no-transform",
+          Connection: "keep-alive",
+        },
+      });
+    }
+
+    // Default structured JSON response
+    return Response.json({
+      message: localResult.message,
+      products: localResult.products || [],
+      showDistributorForm: Boolean(localResult.showDistributorForm),
+      showHandoff: Boolean(localResult.showHandoff),
+      quickReplies: localResult.quickReplies || [],
+      language: lang,
+    });
+  } catch (error: any) {
+    console.error('Chat route error:', error);
+    return new Response(JSON.stringify({ error: "Internal server error." }), {
+      status: 500,
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+      },
+    });
   }
-
-  // --- Validate -------------------------------------------------------------
-  const parsed = bodySchema.safeParse(await req.json().catch(() => null));
-  if (!parsed.success) {
-    return Response.json({ error: "Invalid request body." }, { status: 400 });
-  }
-  const { messages, conversationRef } = parsed.data;
-
-  // --- Route: which business does this turn belong to? ----------------------
-  const plan = planAssistantTurn(messages, {
-    department: asDepartment(parsed.data.department),
-    requestedDepartment: asDepartment(parsed.data.requestedDepartment),
-  });
-
-  const lastUser = [...messages].reverse().find((m) => m.role === "user");
-  const userText = lastUser?.content ?? "";
-  const department = plan.department;
-
-  // Escalation only makes sense once we know which team to escalate to.
-  const escalate = Boolean(department) && shouldEscalate(userText);
-  const ticketId =
-    escalate && department ? generateReference("TKT", department) : undefined;
-  const action = detectAction(userText, department);
-
-  const encoder = new TextEncoder();
-  const startedAt = Date.now();
-
-  const stream = new ReadableStream<Uint8Array>({
-    async start(controller) {
-      let assistantText = "";
-
-      // Tell the client the routing outcome immediately so it can re-theme to
-      // the right brand while the model is still generating.
-      controller.enqueue(
-        encoder.encode(
-          sse({ type: "meta", department, language: plan.language })
-        )
-      );
-
-      try {
-        for await (const chunk of streamAssistantReply(messages, plan)) {
-          assistantText += chunk;
-          controller.enqueue(encoder.encode(sse({ type: "chunk", text: chunk })));
-        }
-
-        if (ticketId && department) {
-          const brand = BRANDS[department];
-          const note = `\n\n🎫 I've created ticket **${ticketId}** and passed this to the ${
-            department === "MARKETING" ? "BITSOL Marketing team" : "BITSOL Institute admissions team"
-          }. Keep this reference for follow-up — you can also reach them on ${brand.contact.phone}.`;
-          assistantText += note;
-          controller.enqueue(encoder.encode(sse({ type: "chunk", text: note })));
-        }
-
-        controller.enqueue(
-          encoder.encode(
-            sse({
-              type: "done",
-              ticketId,
-              department,
-              suggestions: suggestFollowUps(department, userText),
-              action,
-            })
-          )
-        );
-      } catch (err) {
-        console.error("[chat] stream error:", err);
-        controller.enqueue(
-          encoder.encode(
-            sse({
-              type: "error",
-              message:
-                "Sorry, I'm having trouble responding right now. Please try again in a moment.",
-            })
-          )
-        );
-      } finally {
-        controller.close();
-      }
-
-      // --- Best-effort persistence (skips silently if the DB is down) -------
-      void persist({
-        conversationRef,
-        department,
-        language: LANGUAGE_MAP[plan.language],
-        userText,
-        assistantText,
-        ticketId,
-        latencyMs: Date.now() - startedAt,
-      }).catch((e) =>
-        console.warn("[chat] persistence skipped:", e?.message ?? e)
-      );
-    },
-  });
-
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/event-stream; charset=utf-8",
-      "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive",
-    },
-  });
 }
 
-/** Store the exchange for chat history, CRM context and analytics. */
-async function persist(opts: {
-  conversationRef?: string;
-  department: Department | null;
-  language: PrismaLanguage;
-  userText: string;
-  assistantText: string;
-  ticketId?: string;
-  latencyMs: number;
-}) {
-  const {
-    conversationRef,
-    department,
-    language,
-    userText,
-    assistantText,
-    ticketId,
-    latencyMs,
-  } = opts;
 
-  const reference = conversationRef ?? generateConversationReference();
-
-  const conversation = await prisma.conversation.upsert({
-    where: { reference },
-    // Department is written once it is known and then kept — a mid-conversation
-    // switch updates it, but a neutral follow-up never clears it.
-    update: {
-      updatedAt: new Date(),
-      language,
-      ...(department ? { department } : {}),
-    },
-    create: {
-      reference,
-      department,
-      language,
-      title: userText.slice(0, 80),
+// Health‑check endpoint
+export async function GET() {
+  return new Response(JSON.stringify({ status: "ok", timestamp: Date.now() }), {
+    status: 200,
+    headers: {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     },
   });
-
-  if (userText) {
-    await prisma.message.create({
-      data: {
-        conversationId: conversation.id,
-        role: "USER",
-        content: userText,
-        department,
-        language,
-      },
-    });
-  }
-
-  await prisma.message.create({
-    data: {
-      conversationId: conversation.id,
-      role: "ASSISTANT",
-      content: assistantText,
-      department,
-      language,
-      latencyMs,
-    },
-  });
-
-  if (ticketId && department) {
-    await prisma.ticket.create({
-      data: {
-        reference: ticketId,
-        department,
-        category: "GENERAL",
-        subject: "Escalated from the BITSOL AI Assistant",
-        description: userText,
-        conversationId: conversation.id,
-      },
-    });
-
-    await prisma.conversation.update({
-      where: { id: conversation.id },
-      data: { handedOff: true },
-    });
-
-    await notifyTeam({
-      department,
-      subject: `Human handoff requested — ${ticketId}`,
-      body: `A visitor asked for a human.\n\nTicket: ${ticketId}\nConversation: ${reference}\n\nTheir message:\n${userText}`,
-      link: `/admin/support/tickets`,
-    });
-
-    await logEvent({
-      action: "chat.escalated",
-      department,
-      entity: "Ticket",
-      entityId: ticketId,
-      message: "Assistant escalated a conversation to a human.",
-    });
-  }
 }

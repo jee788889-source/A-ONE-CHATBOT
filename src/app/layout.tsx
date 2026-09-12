@@ -1,45 +1,49 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { BRANDING } from "@/lib/branding";
-import { BRANDS } from "@/lib/brands";
 
 export const metadata: Metadata = {
   title: {
-    default: `${BRANDING.product.name} · ${BRANDS.MARKETING.shortName} & ${BRANDS.INSTITUTE.shortName}`,
-    template: `%s · ${BRANDING.product.shortName}`,
+    default: "A-ONE Foods | AI Customer Assistant",
+    template: "%s · A-ONE Foods AI Assistant",
   },
   description:
-    "One AI assistant for BITSOL Marketing and BITSOL Institute of Digital Media & Artificial Intelligence — services, quotes and consultations for businesses; courses, admissions, fees and career guidance for students. English, Urdu, Roman Urdu and Punjabi.",
-  applicationName: BRANDING.product.name,
-  authors: [{ name: BRANDING.developer.name, url: BRANDING.developer.url }],
+    "Discover A-ONE Foods products, get product information, and connect with the A-ONE Foods team through our AI assistant.",
+  applicationName: "A-ONE Foods AI Assistant",
+  authors: [{ name: "A-ONE Foods", url: "https://aonefoods.pk" }],
   keywords: [
-    "BITSOL",
-    "BITSOL Marketing",
-    "BITSOL Institute",
-    "AI chatbot",
-    "WhatsApp automation",
-    "digital marketing",
-    "SEO",
-    "web development",
-    "digital marketing course",
-    "AI course",
-    "admission",
+    "A-ONE Foods",
+    "A-ONE AI Assistant",
+    "Pakistani snacks",
+    "Nimko",
+    "Spices",
+    "Recipe Mixes",
+    "Sindhi Biryani Masala",
+    "Daal Moong",
+    "Frozen Foods",
+    "Distributor",
     "Faisalabad",
+    "Lahore",
+    "Karachi",
+    "Halal Foods",
   ],
   metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"),
   openGraph: {
-    title: BRANDING.product.name,
-    description: BRANDING.developer.tagline,
-    siteName: BRANDING.product.name,
+    title: "A-ONE Foods | AI Customer Assistant",
+    description:
+      "Discover A-ONE Foods products, get product information, and connect with the A-ONE Foods team through our AI assistant.",
+    siteName: "A-ONE Foods",
     type: "website",
+    locale: "en_PK",
   },
   robots: { index: true, follow: true },
 };
 
 export const viewport: Viewport = {
-  themeColor: "#1e2a78",
+  themeColor: "#E05314",
   width: "device-width",
   initialScale: 1,
+  maximumScale: 5,
 };
 
 export default function RootLayout({
@@ -47,7 +51,24 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className="min-h-dvh font-sans">{children}</body>
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              try {
+                if (localStorage.getItem('aone_theme') === 'dark') {
+                  document.documentElement.classList.add('dark');
+                } else {
+                  document.documentElement.classList.remove('dark');
+                }
+              } catch (_) {}
+            `,
+          }}
+        />
+      </head>
+      <body className="min-h-dvh font-sans antialiased bg-background text-foreground">
+        {children}
+      </body>
     </html>
   );
 }

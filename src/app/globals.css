@@ -4,141 +4,89 @@
 
 /*
  * =============================================================================
- *  BITSOL AI Assistant — theme
- * =============================================================================
- *
- *  Three palettes, all HSL CSS variables so shadcn/ui primitives work unchanged:
- *
- *    :root                        BITSOL umbrella (indigo/violet) — used on the
- *                                 landing page, splash and welcome screen,
- *                                 before a business has been chosen.
- *    [data-department="MARKETING"] Electric blue — BITSOL Marketing.
- *    [data-department="INSTITUTE"] Academy emerald — BITSOL Institute.
- *
- *  Setting `data-department` on any wrapper re-themes everything inside it, so
- *  the chat window changes brand the moment the router decides — no component
- *  needs to know which business it is rendering for.
+ *  A-ONE Foods AI Assistant — Brand Theme
+ *  Designed for a premium Pakistani food brand experience:
+ *  Crisp, warm neutral porcelain light mode (default) with rich saffron &
+ *  terracotta amber accents, and an elevated dark mode.
  * =============================================================================
  */
 @layer base {
   :root {
-    /* Urdu/Punjabi-friendly system font stack — no external font fetch. */
+    /* Urdu & English friendly system font stack */
     --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
       "Noto Naskh Arabic", "Jameel Noori Nastaleeq", "Nafees Web Naskh", sans-serif;
 
-    --background: 228 40% 98%;
-    --foreground: 231 45% 13%;
+    /* Light Mode (Default for food brand freshness) */
+    --background: 38 25% 98%;
+    --foreground: 24 12% 14%;
 
     --card: 0 0% 100%;
-    --card-foreground: 231 45% 13%;
+    --card-foreground: 24 12% 14%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 231 45% 13%;
+    --popover-foreground: 24 12% 14%;
 
-    /* BITSOL indigo */
-    --primary: 231 62% 30%;
+    /* A-ONE Terracotta Amber */
+    --primary: 24 88% 46%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 228 38% 96%;
-    --secondary-foreground: 231 45% 18%;
+    /* Warm Linen */
+    --secondary: 35 28% 94%;
+    --secondary-foreground: 24 12% 18%;
 
-    /* BITSOL violet */
-    --accent: 262 68% 56%;
-    --accent-foreground: 0 0% 100%;
+    /* Saffron Gold Accent */
+    --accent: 38 92% 50%;
+    --accent-foreground: 24 12% 14%;
 
-    --muted: 228 28% 94%;
-    --muted-foreground: 231 16% 44%;
+    --muted: 35 18% 92%;
+    --muted-foreground: 24 8% 44%;
 
-    --destructive: 0 72% 48%;
+    --destructive: 0 84% 45%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 231 22% 88%;
-    --input: 231 22% 88%;
-    --ring: 231 62% 42%;
+    --border: 35 15% 88%;
+    --input: 35 15% 88%;
+    --ring: 24 88% 46%;
 
-    --radius: 0.9rem;
+    --radius: 1rem;
 
-    /* Hero/splash backdrop stops, overridden per department below. */
-    --brand-a: 231 62% 22%;
-    --brand-b: 262 68% 34%;
-  }
-
-  /* ---------------------------------------------- BITSOL Marketing (blue) -- */
-  [data-department="MARKETING"] {
-    --primary: 219 78% 34%;
-    --primary-foreground: 0 0% 100%;
-    --accent: 199 89% 45%;
-    --accent-foreground: 0 0% 100%;
-    --ring: 219 78% 46%;
-    --secondary: 214 40% 96%;
-    --secondary-foreground: 217 45% 18%;
-    --muted: 214 30% 94%;
-    --border: 214 24% 88%;
-    --input: 214 24% 88%;
-    --brand-a: 219 78% 20%;
-    --brand-b: 199 89% 28%;
-  }
-
-  /* ---------------------------------------------- BITSOL Institute (green) - */
-  [data-department="INSTITUTE"] {
-    --primary: 168 74% 22%;
-    --primary-foreground: 0 0% 100%;
-    --accent: 158 68% 40%;
-    --accent-foreground: 0 0% 100%;
-    --ring: 168 74% 34%;
-    --secondary: 160 32% 95%;
-    --secondary-foreground: 168 45% 16%;
-    --muted: 160 24% 93%;
-    --border: 160 20% 87%;
-    --input: 160 20% 87%;
-    --brand-a: 168 74% 14%;
-    --brand-b: 158 68% 24%;
+    /* Warm ambient gradients */
+    --brand-a: 24 85% 35%;
+    --brand-b: 18 80% 28%;
   }
 
   .dark {
-    --background: 231 42% 8%;
-    --foreground: 228 38% 96%;
+    /* Rich obsidian charcoal dark mode */
+    --background: 24 10% 8%;
+    --foreground: 38 20% 95%;
 
-    --card: 231 38% 12%;
-    --card-foreground: 228 38% 96%;
+    --card: 24 10% 11%;
+    --card-foreground: 38 20% 95%;
 
-    --popover: 231 38% 12%;
-    --popover-foreground: 228 38% 96%;
+    --popover: 24 10% 11%;
+    --popover-foreground: 38 20% 95%;
 
-    --primary: 231 88% 72%;
-    --primary-foreground: 231 45% 10%;
+    --primary: 24 88% 52%;
+    --primary-foreground: 0 0% 100%;
 
-    --secondary: 231 26% 18%;
-    --secondary-foreground: 228 38% 96%;
+    --secondary: 24 8% 16%;
+    --secondary-foreground: 38 20% 92%;
 
-    --accent: 262 78% 68%;
-    --accent-foreground: 231 45% 10%;
+    --accent: 38 92% 52%;
+    --accent-foreground: 24 10% 10%;
 
-    --muted: 231 26% 18%;
-    --muted-foreground: 231 16% 66%;
+    --muted: 24 8% 18%;
+    --muted-foreground: 35 10% 60%;
 
-    --destructive: 0 62% 52%;
+    --destructive: 0 72% 50%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 231 26% 22%;
-    --input: 231 26% 22%;
-    --ring: 231 88% 72%;
-  }
+    --border: 24 8% 22%;
+    --input: 24 8% 22%;
+    --ring: 24 88% 52%;
 
-  .dark [data-department="MARKETING"] {
-    --primary: 205 90% 66%;
-    --primary-foreground: 217 45% 10%;
-    --accent: 191 84% 54%;
-    --accent-foreground: 217 45% 10%;
-    --ring: 205 90% 66%;
-  }
-
-  .dark [data-department="INSTITUTE"] {
-    --primary: 158 66% 55%;
-    --primary-foreground: 168 45% 8%;
-    --accent: 152 62% 46%;
-    --accent-foreground: 0 0% 100%;
-    --ring: 158 66% 55%;
+    --brand-a: 24 60% 14%;
+    --brand-b: 18 50% 10%;
   }
 }
 
@@ -153,40 +101,47 @@
 }
 
 @layer components {
-  /* Frosted-glass surface used across cards, chat and headers. */
+  /* Frosted-glass surface */
   .glass {
-    @apply bg-white/70 dark:bg-white/[0.06] backdrop-blur-xl border border-white/40 dark:border-white/10;
+    @apply bg-white/80 dark:bg-stone-900/80 backdrop-blur-xl border border-stone-200/60 dark:border-stone-800/60;
   }
 
-  /*
-   * Brand backdrop. Picks up whichever --brand-* pair is in scope, so the same
-   * class renders indigo on the landing page, blue inside a Marketing chat and
-   * emerald inside an Institute chat.
-   */
+  /* Subtle Warm Backdrop */
   .brand-gradient {
     background:
-      radial-gradient(1200px 600px at 10% -10%, hsl(var(--brand-a) / 0.95), transparent 60%),
-      radial-gradient(1000px 500px at 100% 10%, hsl(var(--brand-b) / 0.7), transparent 55%),
-      linear-gradient(160deg, hsl(var(--brand-a)), hsl(var(--brand-b)));
+      radial-gradient(1000px 500px at 15% -5%, hsl(var(--brand-a) / 0.12), transparent 60%),
+      radial-gradient(800px 400px at 85% 15%, hsl(var(--brand-b) / 0.08), transparent 55%),
+      hsl(var(--background));
   }
 
-  /* Right-to-left friendly text block for Urdu / Punjabi content. */
+  .dark .brand-gradient {
+    background:
+      radial-gradient(1000px 500px at 15% -5%, hsl(var(--brand-a) / 0.35), transparent 60%),
+      radial-gradient(800px 400px at 85% 15%, hsl(var(--brand-b) / 0.25), transparent 55%),
+      hsl(var(--background));
+  }
+
+  /* Right-to-left friendly text block for Urdu content */
   .urdu {
     direction: rtl;
     text-align: right;
-    font-size: 1.05rem;
-    line-height: 2;
+    font-size: 1.08rem;
+    line-height: 2.1;
+    font-family: "Noto Naskh Arabic", "Jameel Noori Nastaleeq", "Nafees Web Naskh", system-ui, sans-serif;
   }
 }
 
-/* Slim, unobtrusive scrollbar for the chat transcript and admin tables. */
+/* Slim, unobtrusive scrollbar */
 .scroll-slim::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 .scroll-slim::-webkit-scrollbar-thumb {
-  background: hsl(var(--muted-foreground) / 0.35);
+  background: hsl(var(--muted-foreground) / 0.3);
   border-radius: 9999px;
+}
+.scroll-slim::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.5);
 }
 .scroll-slim::-webkit-scrollbar-track {
   background: transparent;

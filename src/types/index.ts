@@ -3,6 +3,8 @@
 import type { Department } from "@/lib/brands";
 import type { Language } from "@/lib/i18n";
 
+import type { Product } from "@/data/aone-foods/products";
+
 export type { Department, DepartmentSlug } from "@/lib/brands";
 export type { Language } from "@/lib/i18n";
 
@@ -17,6 +19,14 @@ export interface ChatMessage {
   /** Which business this turn belongs to (null before the user has chosen). */
   department?: Department | null;
   createdAt?: string;
+  /** A-ONE Foods attached products */
+  products?: Product[];
+  /** Whether to render an inline distributor inquiry form */
+  showDistributorForm?: boolean;
+  /** Whether to render a human / WhatsApp handoff card */
+  showHandoff?: boolean;
+  /** Suggested reply buttons */
+  quickReplies?: string[];
 }
 
 /** A tappable quick-reply / suggestion surfaced to the user. */

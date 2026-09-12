@@ -1,39 +1,34 @@
 /**
- * Product-level branding for the BITSOL AI Assistant.
- *
- * `BRANDS` (src/lib/brands.ts) holds the two *business* profiles the assistant
- * routes between. This file holds the branding that sits ABOVE both of them —
- * the assistant's own identity and the BITSOL developer attribution rendered on
- * the splash screen, login, footer, about page, admin console and chat widget.
+ * Product-level branding for A-ONE Foods AI Assistant.
  */
-import { BRANDS } from "./brands";
+import { AONE_COMPANY } from "@/data/aone-foods/company";
 
 export const BRANDING = {
   product: {
-    name: "BITSOL AI Assistant",
-    shortName: "BITSOL AI",
-    /** Umbrella group both businesses belong to. */
-    group: "BITSOL",
-    poweredBy: "Powered by Artificial Intelligence",
-    description:
-      "One assistant for BITSOL Marketing and BITSOL Institute of Digital Media & Artificial Intelligence.",
+    name: "A-ONE AI Assistant",
+    shortName: "A-ONE AI",
+    company: "A-ONE Foods",
+    tagline: AONE_COMPANY.tagline,
+    urduTagline: AONE_COMPANY.urduTagline,
+    poweredBy: "Intelligent Customer Representative",
+    description: AONE_COMPANY.description,
   },
-  developer: {
-    name: "BITSOL MARKETING",
-    url: "https://bitsolmarketing.com",
-    tagline: "Empowering Businesses & Learners with Artificial Intelligence",
-    attribution: "Designed & Developed by BITSOL MARKETING",
-  },
-  businesses: {
-    marketing: BRANDS.MARKETING,
-    institute: BRANDS.INSTITUTE,
+  company: {
+    name: "A-ONE Foods",
+    url: "https://aonefoods.pk",
+    instagram: AONE_COMPANY.social.instagram,
+    instagramHandle: AONE_COMPANY.social.instagramHandle,
+    whatsapp: AONE_COMPANY.contact.whatsapp,
+    whatsappUrl: AONE_COMPANY.contact.whatsappUrl,
+    phone: AONE_COMPANY.contact.phone,
+    mobile: AONE_COMPANY.contact.mobile,
+    email: AONE_COMPANY.contact.email,
+    headOffice: AONE_COMPANY.contact.headOffice,
+    hours: AONE_COMPANY.contact.hours,
+    attribution: "Official Digital Assistant of A-ONE Foods",
   },
 } as const;
 
-/** Read a public branding value, allowing env overrides at build time. */
-export const brandName =
-  process.env.NEXT_PUBLIC_BRAND_NAME ?? BRANDING.developer.name;
-export const brandUrl =
-  process.env.NEXT_PUBLIC_BRAND_URL ?? BRANDING.developer.url;
-export const brandTagline =
-  process.env.NEXT_PUBLIC_BRAND_TAGLINE ?? BRANDING.developer.tagline;
+export const brandName = BRANDING.company.name;
+export const brandUrl = BRANDING.company.url;
+export const brandTagline = BRANDING.product.tagline;

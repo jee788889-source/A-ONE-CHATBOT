@@ -5,7 +5,6 @@
  * Node and Edge runtimes (e.g. middleware) without polyfills.
  */
 import { SignJWT, jwtVerify } from "jose";
-import bcrypt from "bcryptjs";
 import { config } from "./config";
 import type { Department, UserRole } from "@prisma/client";
 
@@ -49,13 +48,17 @@ export function canAccessDepartment(
 }
 
 /** Hash a plaintext password for storage. */
-export function hashPassword(plain: string): Promise<string> {
-  return bcrypt.hash(plain, config.bcryptRounds);
+export async function hashPassword(plain: string): Promise<string> {
+  const bcrypt = await import("bcryptjs");
+  const mod = (bcrypt.default ?? bcrypt) as { hash: (s: string, r: number) => Promise<string> };
+  return mod.hash(plain, config.bcryptRounds);
 }
 
 /** Verify a plaintext password against a stored hash. */
-export function verifyPassword(plain: string, hash: string): Promise<boolean> {
-  return bcrypt.compare(plain, hash);
+export async function verifyPassword(plain: string, hash: string): Promise<boolean> {
+  const bcrypt = await import("bcryptjs");
+  const mod = (bcrypt.default ?? bcrypt) as { compare: (s: string, h: string) => Promise<boolean> };
+  return mod.compare(plain, hash);
 }
 
 /** Issue a signed JWT for an authenticated user. */

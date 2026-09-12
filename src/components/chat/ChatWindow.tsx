@@ -1,72 +1,68 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { LayoutGrid, RotateCcw, Repeat, Volume2, VolumeX } from "lucide-react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import {
+  RotateCcw,
+  Sparkles,
+  Search,
+  Package,
+  Building,
+  PhoneCall,
+  UserCheck,
+  Instagram,
+  Volume2,
+  VolumeX,
+  ExternalLink,
+} from "lucide-react";
+import { AOneLogo } from "@/components/branding/AOneLogo";
+import { ThemeToggle } from "@/components/ui/ThemeToggle";
+import { Button } from "@/components/ui/button";
 import { MessageBubble } from "./MessageBubble";
 import { TypingIndicator } from "./TypingIndicator";
-import { SuggestedQuestions } from "./SuggestedQuestions";
-import { DepartmentPicker } from "./DepartmentPicker";
-import { MenuPanel } from "./MenuPanel";
-import { WorkflowForm } from "./WorkflowForm";
 import { ChatInput } from "./ChatInput";
-import { Button } from "@/components/ui/button";
-import { BRANDS, type Department } from "@/lib/brands";
-import { departmentContent } from "@/data";
-import { detectLanguage, speechTagFor, t, type Language } from "@/lib/i18n";
-import { cn, generateConversationReference, shortId } from "@/lib/utils";
-import type { ChatAction, ChatMessage, ChatStreamEvent } from "@/types";
+import { ProductModal } from "./ProductModal";
+import { AONE_PRODUCTS, searchProducts, type Product } from "@/data/aone-foods/products";
+import { AONE_COMPANY } from "@/data/aone-foods/company";
+import { speechTagFor } from "@/lib/i18n";
+import { cn, generateConversationReference } from "@/lib/utils";
+import type { ChatMessage } from "@/types";
 
-const STORAGE_KEY = "bitsol.chat.v1";
+const STORAGE_KEY = "aone.chat.session.v1";
 
-interface PersistedState {
-  reference: string;
-  department: Department | null;
-  messages: ChatMessage[];
-}
+const WELCOME_PROMPT = `Hello! 👋
+I'm the A-ONE Foods AI Assistant.
+How can I help you today?`;
 
-/**
- * =============================================================================
- *  BITSOL AI Assistant — chat surface
- * =============================================================================
- *
- *  Owns the piece of state that makes this a dual-business assistant: the
- *  `department`. It is chosen from the welcome screen, inferred by the server
- *  router, or changed by the user at any time from the header — and it is sent
- *  with every request and persisted with the transcript, which is what gives
- *  the conversation memory across reloads.
- *
- *  Everything downstream (theme, menu, suggestions, quick replies, forms,
- *  avatars) derives from that one value, so no component holds a second,
- *  possibly stale, opinion about which business the user is talking to.
- * =============================================================================
- */
+const QUICK_ACTIONS = [
+  { id: "explore", label: "Explore Products", icon: Sparkles, prompt: "Explore Products" },
+  { id: "find", label: "Find a Product", icon: Search, prompt: "Find a Product" },
+  { id: "info", label: "Product Information", icon: Package, prompt: "Tell me about your product packaging, quality and ingredients." },
+  { id: "distributor", label: "Become a Distributor", icon: Building, prompt: "I want to become an authorized distributor of A-ONE Foods." },
+  { id: "contact", label: "Contact A-ONE", icon: PhoneCall, prompt: "How can I contact A-ONE Foods?" },
+  { id: "human", label: "Talk to a Human", icon: UserCheck, prompt: "I would like to speak with a human representative." },
+];
+
 export function ChatWindow() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [department, setDepartment] = useState<Department | null>(null);
-  const [language, setLanguage] = useState<Language>("en");
   const [streaming, setStreaming] = useState(false);
   const [voiceOut, setVoiceOut] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [quickReplies, setQuickReplies] = useState<string[]>([]);
-  const [activeForm, setActiveForm] = useState<ChatAction | null>(null);
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [hydrated, setHydrated] = useState(false);
 
   const conversationRef = useRef<string>("");
-  const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  // Mirrors `department` for use inside async callbacks without stale closures.
-  const departmentRef = useRef<Department | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
-  // ---------------------------------------------------------------- restore --
+  // Restore chat state
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
-        const parsed = JSON.parse(raw) as PersistedState;
-        conversationRef.current = parsed.reference ?? generateConversationReference();
-        setDepartment(parsed.department ?? null);
-        departmentRef.current = parsed.department ?? null;
-        setMessages(parsed.messages ?? []);
+        const parsed = JSON.parse(raw);
+        conversationRef.current = parsed.reference || generateConversationReference();
+        if (Array.isArray(parsed.messages) && parsed.messages.length > 0) {
+          setMessages(parsed.messages);
+        }
       } else {
         conversationRef.current = generateConversationReference();
       }
@@ -76,61 +72,96 @@ export function ChatWindow() {
     setHydrated(true);
   }, []);
 
-  // ---------------------------------------------------------------- persist --
+  // Save state
   useEffect(() => {
     if (!hydrated || !conversationRef.current) return;
-    const state: PersistedState = {
-      reference: conversationRef.current,
-      department,
-      messages,
-    };
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({
+          reference: conversationRef.current,
+          messages,
+        })
+      );
     } catch {
-      // Quota or private-mode failure — the conversation still works in memory.
+      // storage quota or private mode
     }
-  }, [messages, department, hydrated]);
+  }, [messages, hydrated]);
 
-  // Auto-scroll to the newest message.
+  // Auto-scroll
   useEffect(() => {
-    scrollRef.current?.scrollTo({
-      top: scrollRef.current.scrollHeight,
-      behavior: "smooth",
-    });
-  }, [messages, streaming, activeForm]);
+    const el = scrollRef.current;
+    if (el) {
+      el.scrollTo({
+        top: el.scrollHeight,
+        behavior: "smooth",
+      });
+    }
+  }, [messages, streaming]);
 
+  // Text-to-speech
   const speak = useCallback((text: string) => {
     if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = speechTagFor(text);
+    utterance.lang = speechTagFor(text) || "en-US";
     window.speechSynthesis.speak(utterance);
   }, []);
 
-  // ------------------------------------------------------------------- send --
-  const send = useCallback(
-    async (text: string, requestedDepartment?: Department) => {
-      if (streaming || !text.trim()) return;
+  // Reset / New Chat
+  function handleNewChat() {
+    if (abortRef.current) {
+      abortRef.current.abort();
+    }
+    conversationRef.current = generateConversationReference();
+    setMessages([]);
+    setStreaming(false);
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch {
+      // ignore
+    }
+  }
 
-      setActiveForm(null);
-      setQuickReplies([]);
-      setLanguage(detectLanguage(text));
+  // Send message
+  const handleSend = useCallback(
+    async (text: string) => {
+      const userText = text.trim();
+      if (!userText || streaming) return;
 
-      const activeDepartment = requestedDepartment ?? departmentRef.current;
       const userMsg: ChatMessage = {
-        id: shortId(12),
+        id: `user-${Date.now()}`,
         role: "user",
-        content: text,
-        department: activeDepartment,
+        content: userText,
+        createdAt: new Date().toISOString(),
       };
-      const assistantId = shortId(12);
-      const history = [...messages, userMsg];
 
-      setMessages([
-        ...history,
-        { id: assistantId, role: "assistant", content: "", department: activeDepartment },
-      ]);
+      setMessages((prev) => [...prev, userMsg]);
       setStreaming(true);
+
+      const assistantMsgId = `ai-${Date.now()}`;
+      let accumulated = "";
+      let attachedProducts: Product[] = [];
+      let showDistributorForm = false;
+      let showHandoff = false;
+      let quickReplies: string[] = [];
+
+      // Local client heuristic for instant high-speed reactions
+      const lower = userText.toLowerCase();
+      if (lower.includes("explore") || lower.includes("product") || lower.includes("snacks") || lower.includes("nimko") || lower.includes("masala") || lower.includes("پروڈکٹس") || lower.includes("چیزیں")) {
+        attachedProducts = searchProducts(userText).slice(0, 4);
+        if (attachedProducts.length === 0) {
+          attachedProducts = AONE_PRODUCTS.slice(0, 4);
+        }
+      }
+
+      if (lower.includes("distributor") || lower.includes("dealership") || lower.includes("wholesale") || lower.includes("bulk") || lower.includes("ڈسٹری بیوٹر")) {
+        showDistributorForm = true;
+      }
+
+      if (lower.includes("human") || lower.includes("agent") || lower.includes("talk to a human") || lower.includes("call") || lower.includes("whatsapp") || lower.includes("نمائندے")) {
+        showHandoff = true;
+      }
 
       const controller = new AbortController();
       abortRef.current = controller;
@@ -139,94 +170,148 @@ export function ChatWindow() {
         const res = await fetch("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            conversationRef: conversationRef.current,
-            department: departmentRef.current,
-            requestedDepartment: requestedDepartment ?? null,
-            messages: history.map((m) => ({ role: m.role, content: m.content })),
-          }),
           signal: controller.signal,
+          body: JSON.stringify({
+            messages: [...messages, userMsg].map((m) => ({
+              role: m.role,
+              content: m.content,
+            })),
+            conversationRef: conversationRef.current,
+          }),
         });
 
-        if (!res.ok || !res.body) {
-          throw new Error(
-            (await res.json().catch(() => null))?.error ?? "Request failed"
-          );
+        if (!res.ok) {
+          throw new Error("Chat request failed");
         }
 
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-        let full = "";
+        // Check content type: SSE stream or JSON
+        const contentType = res.headers.get("content-type") || "";
+        if (contentType.includes("text/event-stream")) {
+          const reader = res.body?.getReader();
+          const decoder = new TextDecoder();
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() ?? "";
+          if (!reader) throw new Error("No stream reader");
 
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed.startsWith("data:")) continue;
-            const payload = trimmed.slice(5).trim();
-            if (!payload) continue;
+          let buffer = "";
 
-            let event: ChatStreamEvent;
-            try {
-              event = JSON.parse(payload);
-            } catch {
-              continue;
-            }
+          // Placeholder assistant message
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: assistantMsgId,
+              role: "assistant",
+              content: "",
+              products: attachedProducts,
+              showDistributorForm,
+              showHandoff,
+              createdAt: new Date().toISOString(),
+            },
+          ]);
 
-            if (event.type === "meta") {
-              // The server has routed this turn — adopt its decision so the UI
-              // re-themes and the menu switches while the answer streams in.
-              if (event.department && event.department !== departmentRef.current) {
-                departmentRef.current = event.department;
-                setDepartment(event.department);
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n\n");
+            buffer = lines.pop() || "";
+
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (!trimmed.startsWith("data:")) continue;
+              try {
+                const data = JSON.parse(trimmed.replace(/^data:\s*/, ""));
+                if (data.type === "chunk") {
+                  accumulated += data.text;
+                  setMessages((prev) =>
+                    prev.map((m) =>
+                      m.id === assistantMsgId ? { ...m, content: accumulated } : m
+                    )
+                  );
+                } else if (data.type === "done") {
+                  if (data.products && Array.isArray(data.products) && data.products.length > 0) {
+                    attachedProducts = data.products;
+                  }
+                  if (data.showDistributorForm !== undefined) {
+                    showDistributorForm = data.showDistributorForm;
+                  }
+                  if (data.showHandoff !== undefined) {
+                    showHandoff = data.showHandoff;
+                  }
+                  if (data.quickReplies && Array.isArray(data.quickReplies)) {
+                    quickReplies = data.quickReplies;
+                  }
+
+                  setMessages((prev) =>
+                    prev.map((m) =>
+                      m.id === assistantMsgId
+                        ? {
+                            ...m,
+                            content: accumulated || m.content,
+                            products: attachedProducts,
+                            showDistributorForm,
+                            showHandoff,
+                            quickReplies,
+                          }
+                        : m
+                    )
+                  );
+                }
+              } catch {
+                // Ignore parse errors on partial chunks
               }
-              setLanguage(event.language);
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === assistantId || m.id === userMsg.id
-                    ? { ...m, department: event.department }
-                    : m
-                )
-              );
-            } else if (event.type === "chunk") {
-              full += event.text;
-              setMessages((prev) =>
-                prev.map((m) => (m.id === assistantId ? { ...m, content: full } : m))
-              );
-            } else if (event.type === "done") {
-              if (event.suggestions?.length) setQuickReplies(event.suggestions);
-              if (event.action) setActiveForm(event.action);
-            } else if (event.type === "error") {
-              full = event.message;
-              setMessages((prev) =>
-                prev.map((m) => (m.id === assistantId ? { ...m, content: full } : m))
-              );
             }
           }
+        } else {
+          // Standard JSON response
+          const json = await res.json();
+          accumulated = json.message || "I'm here to assist you with A-ONE Foods products and services.";
+          if (json.products && Array.isArray(json.products)) {
+            attachedProducts = json.products;
+          }
+          if (json.showDistributorForm !== undefined) {
+            showDistributorForm = json.showDistributorForm;
+          }
+          if (json.showHandoff !== undefined) {
+            showHandoff = json.showHandoff;
+          }
+          if (json.quickReplies && Array.isArray(json.quickReplies)) {
+            quickReplies = json.quickReplies;
+          }
+
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: assistantMsgId,
+              role: "assistant",
+              content: accumulated,
+              products: attachedProducts,
+              showDistributorForm,
+              showHandoff,
+              quickReplies,
+              createdAt: new Date().toISOString(),
+            },
+          ]);
         }
 
-        if (voiceOut && full) speak(full);
-      } catch (err: unknown) {
-        if ((err as { name?: string })?.name !== "AbortError") {
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === assistantId
-                ? {
-                    ...m,
-                    content:
-                      m.content ||
-                      "Sorry, I couldn't reach the assistant. Please check your connection and try again.",
-                  }
-                : m
-            )
-          );
+        if (voiceOut && accumulated) {
+          speak(accumulated);
         }
+      } catch (err: any) {
+        if (err?.name === "AbortError") {
+          // User canceled
+          return;
+        }
+        // Polite customer-facing error per requirements
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `err-${Date.now()}`,
+            role: "assistant",
+            content: "Something went wrong. Please try again.",
+            createdAt: new Date().toISOString(),
+          },
+        ]);
       } finally {
         setStreaming(false);
         abortRef.current = null;
@@ -235,237 +320,168 @@ export function ChatWindow() {
     [messages, streaming, voiceOut, speak]
   );
 
-  // -------------------------------------------------------------- controls --
-  function pickDepartment(next: Department) {
-    departmentRef.current = next;
-    setDepartment(next);
-    setQuickReplies([]);
-    setActiveForm(null);
-  }
-
-  function switchDepartment() {
-    const next: Department = department === "MARKETING" ? "INSTITUTE" : "MARKETING";
-    pickDepartment(next);
-    void send(
-      `I'd like to talk about ${BRANDS[next].name} instead.`,
-      next
-    );
-  }
-
-  function stop() {
-    abortRef.current?.abort();
-    setStreaming(false);
-  }
-
-  function reset() {
-    stop();
-    if (typeof window !== "undefined") window.speechSynthesis?.cancel();
-    conversationRef.current = generateConversationReference();
-    departmentRef.current = null;
-    setDepartment(null);
-    setMessages([]);
-    setQuickReplies([]);
-    setActiveForm(null);
-    try {
-      localStorage.removeItem(STORAGE_KEY);
-    } catch {
-      /* ignore */
-    }
-  }
-
-  /** Append a system-authored confirmation (form submitted, etc.). */
-  function appendAssistant(content: string) {
-    setMessages((prev) => [
-      ...prev,
-      { id: shortId(12), role: "assistant", content, department: departmentRef.current },
-    ]);
-    setActiveForm(null);
-  }
-
-  // --------------------------------------------------------------- rendering -
-  const brand = department ? BRANDS[department] : null;
-  const isEmpty = messages.length === 0;
-  const showPicker = isEmpty && !department;
-  const defaultQuickReplies = department
-    ? departmentContent(department).quickReplies
-    : [];
-  const chips = quickReplies.length ? quickReplies : defaultQuickReplies;
-  const lastMessage = messages[messages.length - 1];
-  const awaitingFirstToken =
-    streaming && lastMessage?.role === "assistant" && !lastMessage.content;
-
   return (
-    <div
-      className="relative flex h-full flex-col overflow-hidden"
-      data-department={department ?? undefined}
-    >
-      {department && (
-        <MenuPanel
-          department={department}
-          open={menuOpen}
-          onClose={() => setMenuOpen(false)}
-          onPrompt={(prompt) => void send(prompt)}
-          onAction={(action) => setActiveForm(action)}
-        />
-      )}
+    <div className="flex h-full w-full flex-col bg-background text-foreground select-text overflow-hidden">
+      {/* ================================================= Header ============ */}
+      <header className="sticky top-0 z-30 flex h-14 sm:h-16 items-center justify-between border-b border-stone-200/80 dark:border-stone-800/80 bg-card/85 px-3.5 sm:px-6 backdrop-blur-md">
+        {/* Brand identity & status */}
+        <div className="flex items-center gap-3">
+          <AOneLogo size="md" />
 
-      {/* Toolbar */}
-      <div className="flex items-center justify-between gap-2 border-b px-3 py-2.5">
-        <div className="flex min-w-0 items-center gap-2">
-          {department && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="gap-1.5 px-2"
-              onClick={() => setMenuOpen(true)}
-              aria-label="Open menu"
-            >
-              <LayoutGrid className="size-4" />
-              <span className="hidden sm:inline">{t("chat.menu", language)}</span>
-            </Button>
-          )}
-          <span className="inline-flex min-w-0 items-center gap-1.5 text-xs text-accent">
-            <span className="size-2 shrink-0 rounded-full bg-accent" />
-            <span className="truncate">
-              {brand ? brand.shortName : t("chat.online", language)}
-            </span>
-          </span>
+          {/* Status badge */}
+          <div className="hidden sm:flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 border border-emerald-500/20">
+            <span className="size-2 rounded-full bg-emerald-500 animate-pulse" />
+            Online
+          </div>
         </div>
 
-        <div className="flex items-center gap-0.5">
-          {department && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="gap-1.5 px-2"
-              onClick={switchDepartment}
-              disabled={streaming}
-              title={`Switch to ${
-                department === "MARKETING" ? "BITSOL Institute" : "BITSOL Marketing"
-              }`}
-            >
-              <Repeat className="size-4" />
-              <span className="hidden sm:inline">{t("chat.switch", language)}</span>
-            </Button>
-          )}
-          <Button
-            variant={voiceOut ? "accent" : "ghost"}
-            size="sm"
-            className="gap-1.5 px-2"
-            onClick={() => {
-              if (voiceOut && typeof window !== "undefined") {
-                window.speechSynthesis?.cancel();
-              }
-              setVoiceOut((v) => !v);
-            }}
-            aria-pressed={voiceOut}
+        {/* Action Controls */}
+        <div className="flex items-center gap-1 sm:gap-2">
+          {/* Official Instagram Link */}
+          <a
+            href={AONE_COMPANY.social.instagram}
+            target="_blank"
+            rel="noreferrer"
+            className="flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-pink-600 hover:bg-pink-500/10 transition-colors"
+            title="Follow A-ONE Foods on Instagram"
           >
-            {voiceOut ? <Volume2 className="size-4" /> : <VolumeX className="size-4" />}
-            <span className="hidden sm:inline">{t("chat.voice", language)}</span>
+            <Instagram className="size-4" />
+            <span className="hidden md:inline">@aone_foods</span>
+          </a>
+
+          {/* Voice output toggle */}
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={() => setVoiceOut((v) => !v)}
+            className="size-8 rounded-xl text-muted-foreground hover:text-foreground"
+            title={voiceOut ? "Mute read-aloud" : "Enable read-aloud"}
+            aria-label="Toggle voice responses"
+          >
+            {voiceOut ? <Volume2 className="size-4 text-primary" /> : <VolumeX className="size-4" />}
           </Button>
-          <Button variant="ghost" size="sm" className="gap-1.5 px-2" onClick={reset}>
-            <RotateCcw className="size-4" />
-            <span className="hidden sm:inline">{t("chat.newChat", language)}</span>
+
+          {/* Theme Switcher */}
+          <ThemeToggle />
+
+          {/* New Chat Button */}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={handleNewChat}
+            className="h-8 gap-1.5 rounded-xl text-xs font-medium border-stone-200 dark:border-stone-800 hover:bg-stone-100 dark:hover:bg-stone-800"
+            title="Start a new chat session"
+          >
+            <RotateCcw className="size-3.5 text-muted-foreground" />
+            <span className="hidden xs:inline">New Chat</span>
           </Button>
         </div>
-      </div>
+      </header>
 
-      {/* Transcript */}
-      <div ref={scrollRef} className="scroll-slim flex-1 overflow-y-auto px-4 py-6">
-        {showPicker ? (
-          <div className="flex h-full flex-col items-center justify-center">
-            <DepartmentPicker
-              language={language}
-              onPick={(next) => {
-                pickDepartment(next);
-                void send(
-                  next === "MARKETING"
-                    ? "I'm interested in BITSOL Marketing services."
-                    : "I'm interested in BITSOL Institute courses and admissions.",
-                  next
-                );
-              }}
-            />
-          </div>
-        ) : isEmpty && department ? (
-          <div className="flex h-full flex-col items-center justify-center gap-8">
-            <div className="text-center">
-              <h2 className="text-2xl font-bold">{t("chat.emptyTitle", language)}</h2>
-              <p className="mt-1 text-sm text-muted-foreground">{brand?.tagline}</p>
-            </div>
-            <SuggestedQuestions
-              department={department}
-              language={language}
-              onPick={(prompt) => void send(prompt)}
-            />
-          </div>
-        ) : (
-          <div className="mx-auto flex max-w-3xl flex-col gap-5">
-            {messages.map((message) =>
-              message.role === "assistant" && !message.content && awaitingFirstToken ? (
-                <div key={message.id} className="flex gap-3">
-                  <span className="mt-1 size-8 shrink-0" />
-                  <TypingIndicator />
-                </div>
-              ) : (
-                <MessageBubble key={message.id} message={message} onSpeak={speak} />
-              )
-            )}
+      {/* ================================================= Conversation Area == */}
+      <div
+        ref={scrollRef}
+        className="flex-1 overflow-y-auto px-3.5 py-4 sm:px-6 sm:py-6 scroll-slim"
+      >
+        <div className="mx-auto flex max-w-4xl flex-col space-y-6">
+          {/* Welcome State (Visible when no messages yet) */}
+          {messages.length === 0 && (
+            <div className="flex flex-col items-center text-center py-6 sm:py-12 animate-in fade-in duration-300">
+              <AOneLogo size="xl" variant="icon" className="mb-4" />
 
-            {activeForm && department && (
-              <div className="ml-11">
-                <WorkflowForm
-                  action={activeForm}
-                  department={department}
-                  conversationRef={conversationRef.current}
-                  onCancel={() => setActiveForm(null)}
-                  onResult={appendAssistant}
-                  onPrompt={(prompt) => {
-                    setActiveForm(null);
-                    void send(prompt);
-                  }}
-                />
+              <h2 className="text-2xl sm:text-3xl font-black tracking-tight text-foreground max-w-md">
+                Hello! 👋
+              </h2>
+              <p className="text-base sm:text-lg font-medium text-primary mt-1">
+                I&apos;m the A-ONE Foods AI Assistant.
+              </p>
+              <p className="text-sm text-muted-foreground mt-1 max-w-md">
+                How can I help you today?
+              </p>
+
+              {/* Smart Quick Suggestion Buttons */}
+              <div className="mt-8 grid grid-cols-2 sm:grid-cols-3 gap-2.5 w-full max-w-2xl">
+                {QUICK_ACTIONS.map((action) => {
+                  const Icon = action.icon;
+                  return (
+                    <button
+                      key={action.id}
+                      type="button"
+                      onClick={() => handleSend(action.prompt)}
+                      className="group flex flex-col items-start p-3 sm:p-3.5 rounded-2xl border border-stone-200/90 dark:border-stone-800/90 bg-card hover:border-primary/40 hover:bg-stone-50 dark:hover:bg-stone-900/60 shadow-2xs hover:shadow-sm transition-all text-left"
+                    >
+                      <div className="rounded-xl bg-primary/10 p-2 text-primary group-hover:scale-105 transition-transform mb-2">
+                        <Icon className="size-4" />
+                      </div>
+                      <span className="font-bold text-xs sm:text-sm text-foreground group-hover:text-primary transition-colors">
+                        {action.label}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
-            )}
-          </div>
-        )}
-      </div>
 
-      {/* Quick replies + composer */}
-      <div className="border-t bg-background/60 px-4 py-3">
-        <div className="mx-auto max-w-3xl space-y-2.5">
-          {!showPicker && chips.length > 0 && (
-            <div className="scroll-slim flex gap-2 overflow-x-auto pb-0.5">
-              {chips.map((chip) => (
-                <button
-                  key={chip}
-                  type="button"
-                  disabled={streaming}
-                  onClick={() => void send(chip)}
-                  className={cn(
-                    "shrink-0 rounded-full border bg-secondary px-3 py-1 text-xs text-secondary-foreground transition",
-                    "hover:border-primary/40 hover:bg-primary/10 disabled:opacity-50"
-                  )}
-                >
-                  {chip}
-                </button>
-              ))}
+              {/* Brand assurance note */}
+              <div className="mt-8 flex items-center gap-2 text-xs text-muted-foreground">
+                <span className="size-1.5 rounded-full bg-emerald-500" />
+                <span>Verified products, authentic Pakistani spices, and official distributor services.</span>
+              </div>
             </div>
           )}
 
-          <ChatInput
-            onSend={(text) => void send(text)}
-            disabled={streaming}
-            streaming={streaming}
-            onStop={stop}
-            placeholder={t("chat.placeholder", language)}
-          />
+          {/* Render Messages */}
+          {messages.map((message) => (
+            <MessageBubble
+              key={message.id}
+              message={message}
+              onSpeak={speak}
+              onViewProductDetails={(prod) => setSelectedProduct(prod)}
+              onAskAi={(prompt) => handleSend(prompt)}
+              onQuickReply={(reply) => handleSend(reply)}
+            />
+          ))}
 
-          <p className="text-center text-[11px] text-muted-foreground">
-            {t("chat.disclaimer", language)}
-          </p>
+          {/* Streaming Typing Indicator */}
+          {streaming && (
+            <div className="flex w-full gap-3">
+              <div className="shrink-0 mt-0.5">
+                <div className="grid size-8 place-items-center rounded-xl bg-gradient-to-br from-amber-500 to-red-600 text-white font-bold text-xs">
+                  A1
+                </div>
+              </div>
+              <TypingIndicator />
+            </div>
+          )}
         </div>
       </div>
+
+      {/* ================================================= Floating Input Area */}
+      <div className="sticky bottom-0 z-20 border-t border-stone-200/80 dark:border-stone-800/80 bg-background/90 px-3.5 py-3 sm:px-6 backdrop-blur-md">
+        <ChatInput
+          onSend={handleSend}
+          streaming={streaming}
+          onStop={() => {
+            if (abortRef.current) abortRef.current.abort();
+            setStreaming(false);
+          }}
+          placeholder="Ask A-ONE anything… (English, اردو, Roman Urdu)"
+        />
+        <div className="mx-auto mt-2 text-center text-[10px] text-muted-foreground/70">
+          A-ONE Foods Official Customer Assistant · Responses are grounded in verified company information.
+        </div>
+      </div>
+
+      {/* ================================================= Product Details Modal */}
+      <ProductModal
+        product={selectedProduct}
+        onClose={() => setSelectedProduct(null)}
+        onAskAi={(prompt) => {
+          setSelectedProduct(null);
+          handleSend(prompt);
+        }}
+      />
     </div>
   );
 }

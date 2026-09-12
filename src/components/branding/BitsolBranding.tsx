@@ -23,15 +23,7 @@ export function BitsolBranding({
           {BRANDING.product.poweredBy}
         </span>
         <span className="text-xs text-muted-foreground">
-          {BRANDING.developer.attribution.split("BITSOL MARKETING")[0]}
-          <Link
-            href={brandUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="font-semibold text-foreground hover:text-primary"
-          >
-            {brandName}
-          </Link>
+          {BRANDING.company.attribution}
         </span>
       </div>
     );

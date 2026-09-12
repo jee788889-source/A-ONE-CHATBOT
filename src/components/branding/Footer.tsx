@@ -17,7 +17,7 @@ export function Footer() {
             {BRANDING.product.description}
           </p>
           <p className="mt-3 text-[11px] text-muted-foreground/80">
-            © {year} {BRANDING.product.group}. All rights reserved.
+            © {year} {BRANDING.product.company}. All rights reserved.
           </p>
         </div>
 
