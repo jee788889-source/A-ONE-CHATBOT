@@ -34,84 +34,8 @@ export interface OrderRecord {
   customer?: { id: string; name: string | null; phone: string; address: string | null } | null;
 }
 
-const memoryOrders: OrderRecord[] = [
-  {
-    id: "ord-1001",
-    orderNumber: "AONE-1025",
-    customerId: "cust-1",
-    status: "NEW",
-    orderType: "DELIVERY",
-    paymentStatus: "PENDING_VERIFICATION",
-    subtotal: 1700,
-    deliveryFee: 150,
-    discount: 0,
-    total: 1850,
-    customerName: "Muhammad Usman",
-    customerPhone: "+92 300 1234567",
-    deliveryAddress: "House 42-B, Street 5, Phase 5 DHA, Lahore",
-    notes: "Please pack spoons and extra ketchup packets.",
-    paymentMethod: "JAZZCASH",
-    paymentReference: "JC-99281742",
-    createdAt: new Date(),
-    updatedAt: new Date(),
-    items: [
-      { id: "oi-1", orderId: "ord-1001", itemName: "A-ONE Special Beef Smash Burger", unitPrice: 850, quantity: 2, subtotal: 1700 },
-    ],
-    assignedStaff: null,
-    customer: { id: "cust-1", name: "Muhammad Usman", phone: "+92 300 1234567", address: "House 42-B, Street 5, Phase 5 DHA, Lahore" },
-  },
-  {
-    id: "ord-1002",
-    orderNumber: "AONE-1024",
-    customerId: "cust-2",
-    status: "CONFIRMED",
-    orderType: "DELIVERY",
-    paymentStatus: "CASH_ON_DELIVERY",
-    subtotal: 1300,
-    deliveryFee: 150,
-    discount: 50,
-    total: 1400,
-    customerName: "Ayesha Khan",
-    customerPhone: "+92 321 9876543",
-    deliveryAddress: "Flat 304, Gulberg Heights, Main Boulevard, Lahore",
-    notes: "Call when downstairs.",
-    paymentMethod: "CASH_ON_DELIVERY",
-    createdAt: new Date(Date.now() - 3600000),
-    updatedAt: new Date(),
-    items: [
-      { id: "oi-2", orderId: "ord-1002", itemName: "Crispy Zinger Crunch Burger", unitPrice: 650, quantity: 2, subtotal: 1300 },
-    ],
-    assignedStaff: { id: "staff-1", name: "Admin Staff", email: "staff@aone.com" },
-    customer: { id: "cust-2", name: "Ayesha Khan", phone: "+92 321 9876543", address: "Flat 304, Gulberg Heights, Main Boulevard, Lahore" },
-  },
-  {
-    id: "ord-1003",
-    orderNumber: "AONE-1023",
-    customerId: "cust-3",
-    status: "PREPARING",
-    orderType: "DELIVERY",
-    paymentStatus: "PAID",
-    subtotal: 1040,
-    deliveryFee: 150,
-    discount: 0,
-    total: 1190,
-    customerName: "Hamza Tariq",
-    customerPhone: "+92 333 5551212",
-    deliveryAddress: "Plot 18, Block G, Model Town, Lahore",
-    notes: "Spicy biryani with fresh salad.",
-    paymentMethod: "EASYPAISA",
-    paymentReference: "EP-8837190",
-    paymentVerifiedBy: "Owner",
-    paymentVerifiedAt: new Date(Date.now() - 7200000),
-    createdAt: new Date(Date.now() - 7200000),
-    updatedAt: new Date(),
-    items: [
-      { id: "oi-3", orderId: "ord-1003", itemName: "A-ONE Special Chicken Dum Biryani", unitPrice: 520, quantity: 2, subtotal: 1040 },
-    ],
-    assignedStaff: { id: "staff-1", name: "Admin Staff", email: "staff@aone.com" },
-    customer: { id: "cust-3", name: "Hamza Tariq", phone: "+92 333 5551212", address: "Plot 18, Block G, Model Town, Lahore" },
-  },
-];
+// Clean in-memory orders store initialized with ZERO demo records
+const memoryOrders: OrderRecord[] = [];
 
 export async function fetchOrders(params: {
   status?: string | null;
@@ -162,17 +86,17 @@ export async function fetchOrders(params: {
       prisma.order.count({ where }),
     ]);
 
-    if (orders && orders.length > 0) {
+    if (orders) {
       return {
         orders: orders as OrderRecord[],
         totalCount,
         page,
         limit,
-        totalPages: Math.ceil(totalCount / limit),
+        totalPages: Math.ceil(totalCount / limit) || 1,
       };
     }
   } catch (err: any) {
-    console.warn("[order-store:fetchOrders] database fallback:", err?.message || err);
+    console.warn("[order-store:fetchOrders] database notice:", err?.message || err);
   }
 
   // Memory fallback filtering
@@ -207,7 +131,7 @@ export async function fetchOrders(params: {
     totalCount,
     page,
     limit,
-    totalPages: Math.ceil(totalCount / limit),
+    totalPages: Math.ceil(totalCount / limit) || 1,
   };
 }
 
@@ -224,7 +148,7 @@ export async function fetchOrderById(id: string): Promise<OrderRecord | null> {
 
     if (order) return order as OrderRecord;
   } catch (err: any) {
-    console.warn("[order-store:fetchOrderById] database fallback:", err?.message || err);
+    console.warn("[order-store:fetchOrderById] database notice:", err?.message || err);
   }
 
   const found = memoryOrders.find((o) => o.id === id || o.orderNumber === id);

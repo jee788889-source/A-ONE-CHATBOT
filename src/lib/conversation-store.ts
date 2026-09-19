@@ -21,41 +21,8 @@ export interface ConversationRecord {
   createdAt: Date;
 }
 
-const memoryConversations: ConversationRecord[] = [
-  {
-    id: "conv-1",
-    customerId: "cust-1",
-    customerPhone: "+92 300 1234567",
-    customerName: "Muhammad Usman",
-    customerAddress: "House 42-B, Street 5, Phase 5 DHA, Lahore",
-    customerNotes: "VIP Customer",
-    totalOrders: 14,
-    totalSpent: 12850,
-    recentOrders: [],
-    channel: "WHATSAPP",
-    status: "OPEN",
-    unreadCount: 1,
-    lastMessageAt: new Date(),
-    lastMessageContent: "Can I get extra sauce with the beef burger order?",
-    createdAt: new Date(Date.now() - 86400000),
-  },
-  {
-    id: "conv-2",
-    customerId: "cust-2",
-    customerPhone: "+92 321 9876543",
-    customerName: "Ayesha Khan",
-    customerAddress: "Flat 304, Gulberg Heights, Main Boulevard, Lahore",
-    totalOrders: 9,
-    totalSpent: 7420,
-    recentOrders: [],
-    channel: "WHATSAPP",
-    status: "RESOLVED",
-    unreadCount: 0,
-    lastMessageAt: new Date(Date.now() - 3600000),
-    lastMessageContent: "Thank you, the food was delicious!",
-    createdAt: new Date(Date.now() - 172800000),
-  },
-];
+// Clean in-memory conversation store initialized with ZERO demo records
+const memoryConversations: ConversationRecord[] = [];
 
 export async function fetchConversations(status?: string | null, search?: string | null) {
   try {
@@ -92,7 +59,7 @@ export async function fetchConversations(status?: string | null, search?: string
       },
     });
 
-    if (conversations && conversations.length > 0) {
+    if (conversations) {
       return conversations.map((conv) => ({
         id: conv.id,
         customerId: conv.customerId,
@@ -114,7 +81,7 @@ export async function fetchConversations(status?: string | null, search?: string
       }));
     }
   } catch (err: any) {
-    console.warn("[conversation-store:fetchConversations] db fallback:", err?.message || err);
+    console.warn("[conversation-store:fetchConversations] database notice:", err?.message || err);
   }
 
   let filtered = [...memoryConversations];
