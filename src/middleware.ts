@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { SESSION_COOKIE, verifySession, canAccessAdmin } from "@/lib/auth";
+import { SESSION_COOKIE, verifySession, canAccessAdmin } from "@/lib/session";
 
 /**
  * Edge middleware guarding the admin console.

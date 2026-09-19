@@ -36,7 +36,8 @@ const schema = z.object({
   BCRYPT_ROUNDS: z.coerce.number().int().min(8).max(15).default(10),
 
   AI_PROVIDER: z.enum(["anthropic", "openai", "gemini", "claude", "openrouter"]).default("anthropic"),
-  AI_MODEL: z.string().default("claude-3-5-sonnet-20241022"),
+  AI_MODEL: optional,
+  OPENROUTER_MODEL: optional,
   AI_MAX_TOKENS: z.coerce.number().int().positive().default(800),
   AI_API_KEY: optional,
   ANTHROPIC_API_KEY: optional,
@@ -72,6 +73,16 @@ if (!parsed.success) {
 
 const env = parsed.success ? parsed.data : schema.parse({});
 
+const activeAIProvider =
+  env.AI_PROVIDER === "openrouter" || (Boolean(env.OPENROUTER_API_KEY) && env.AI_PROVIDER === "anthropic" && !env.ANTHROPIC_API_KEY)
+    ? "openrouter"
+    : env.AI_PROVIDER;
+
+const activeAIModel =
+  activeAIProvider === "openrouter"
+    ? (env.OPENROUTER_MODEL || env.AI_MODEL || "openrouter/free")
+    : (env.AI_MODEL || "claude-3-5-sonnet-20241022");
+
 export const config = {
   env: env.NODE_ENV,
   isDev: env.NODE_ENV === "development",
@@ -90,11 +101,14 @@ export const config = {
   },
   bcryptRounds: env.BCRYPT_ROUNDS,
   ai: {
-    provider: env.AI_PROVIDER,
-    model: env.AI_MODEL,
+    provider: activeAIProvider,
+    model: activeAIModel,
+    openrouterModel: env.OPENROUTER_MODEL || env.AI_MODEL || "openrouter/free",
     maxTokens: env.AI_MAX_TOKENS,
-    apiKey: env.AI_API_KEY || env.ANTHROPIC_API_KEY || env.OPENROUTER_API_KEY || env.OPENAI_API_KEY || env.GEMINI_API_KEY,
-    anthropicKey: env.ANTHROPIC_API_KEY || env.AI_API_KEY,
+    apiKey: activeAIProvider === "openrouter"
+      ? (env.OPENROUTER_API_KEY || env.AI_API_KEY)
+      : (env.AI_API_KEY || env.ANTHROPIC_API_KEY || env.OPENROUTER_API_KEY || env.OPENAI_API_KEY || env.GEMINI_API_KEY),
+    anthropicKey: env.ANTHROPIC_API_KEY,
     openrouterKey: env.OPENROUTER_API_KEY || env.AI_API_KEY,
     openaiKey: env.OPENAI_API_KEY,
     geminiKey: env.GEMINI_API_KEY,
@@ -113,3 +127,4 @@ export const config = {
     notifyPhone: env.ORDER_NOTIFY_PHONE,
   },
 };
+

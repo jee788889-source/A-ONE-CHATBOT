@@ -15,6 +15,7 @@ export { routeDepartment } from "./router";
 export { retrieveKnowledge, searchKnowledge } from "./knowledge";
 export { detectAction, shouldEscalate, suggestFollowUps } from "./intents";
 export { processCustomerMessage } from "./engine";
+export { testOpenRouterRequest } from "./providers/openrouter";
 export * from "./tools";
 export * from "./cart";
 export * from "./nlu";
@@ -23,9 +24,13 @@ export * from "./nlu";
  * Resolve the configured AI provider for A-ONE Restaurant.
  */
 export function getProvider(): AIProvider {
-  switch (config.ai.provider as string) {
-    case "openrouter":
-      return createOpenRouterProvider();
+  const provider = config.ai.provider as string;
+
+  if (provider === "openrouter" || config.ai.openrouterKey) {
+    return createOpenRouterProvider();
+  }
+
+  switch (provider) {
     case "openai":
       return createOpenAIProvider(false);
     case "gemini":
@@ -33,12 +38,19 @@ export function getProvider(): AIProvider {
     case "anthropic":
     case "claude":
     default:
-      if (config.ai.openrouterKey && !config.ai.anthropicKey) {
+      if (config.ai.openrouterKey) {
         return createOpenRouterProvider();
       }
-      return createClaudeProvider();
+      if (config.ai.openaiKey) {
+        return createOpenAIProvider(false);
+      }
+      if (config.ai.geminiKey) {
+        return createGeminiProvider();
+      }
+      return createOpenRouterProvider();
   }
 }
+
 
 export interface AssistantContext {
   department: Department | null;

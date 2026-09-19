@@ -1,1 +1,4 @@
-export { GET, POST, runtime, dynamic } from "../../whatsapp/webhook/route";
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+export { GET, POST } from "../../whatsapp/webhook/route";
