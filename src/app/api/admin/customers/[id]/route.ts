@@ -2,8 +2,8 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/lib/session";
 import { isManagerOrOwner, canAccessAdmin, logAuditEvent } from "@/lib/auth";
-import { prisma } from "@/lib/db";
 import { clientIp } from "@/lib/api";
+import { fetchCustomerById, updateCustomerProfile } from "@/lib/customer-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,27 +29,13 @@ export async function GET(
   const { id } = await params;
 
   try {
-    const customer = await prisma.customer.findUnique({
-      where: { id },
-      include: {
-        orders: {
-          take: 10,
-          orderBy: { createdAt: "desc" },
-          include: { items: true },
-        },
-        conversations: {
-          take: 5,
-          orderBy: { lastMessageAt: "desc" },
-        },
-      },
-    });
-
+    const customer = await fetchCustomerById(id);
     if (!customer) {
       return Response.json({ ok: false, error: "Customer not found." }, { status: 404 });
     }
 
     return Response.json({ ok: true, customer });
-  } catch (error) {
+  } catch (error: any) {
     console.error("[customer GET id] error:", error);
     return Response.json({ ok: false, error: "Failed to fetch customer profile." }, { status: 500 });
   }
@@ -77,34 +63,7 @@ export async function PATCH(
   const ip = clientIp(req);
 
   try {
-    const customer = await prisma.customer.findUnique({ where: { id } });
-    if (!customer) {
-      return Response.json({ ok: false, error: "Customer not found." }, { status: 404 });
-    }
-
-    const updateData: any = {};
-    if (data.name !== undefined) updateData.name = data.name.trim() || null;
-    if (data.phone !== undefined) updateData.phone = data.phone.trim();
-    if (data.email !== undefined) updateData.email = data.email.trim() || null;
-    if (data.address !== undefined) updateData.address = data.address.trim() || null;
-    if (data.notes !== undefined) updateData.notes = data.notes;
-
-    // Handle soft archive: if isArchived is toggled, store in notes tag or field
-    if (data.isArchived !== undefined) {
-      const currentNotes = customer.notes || "";
-      if (data.isArchived) {
-        if (!currentNotes.includes("[ARCHIVED]")) {
-          updateData.notes = `[ARCHIVED] ${currentNotes}`.trim();
-        }
-      } else {
-        updateData.notes = currentNotes.replace(/\[ARCHIVED\]\s*/g, "").trim();
-      }
-    }
-
-    const updated = await prisma.customer.update({
-      where: { id },
-      data: updateData,
-    });
+    const updated = await updateCustomerProfile(id, data);
 
     await logAuditEvent({
       actorId: session?.sub || "system",
@@ -120,7 +79,7 @@ export async function PATCH(
     });
 
     return Response.json({ ok: true, customer: updated });
-  } catch (error) {
+  } catch (error: any) {
     console.error("[customer PATCH] error:", error);
     return Response.json({ ok: false, error: "Failed to update customer." }, { status: 500 });
   }

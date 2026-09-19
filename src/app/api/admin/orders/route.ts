@@ -6,6 +6,8 @@ import { prisma } from "@/lib/db";
 import { clientIp } from "@/lib/api";
 import type { OrderStatus, OrderType, PaymentStatus } from "@prisma/client";
 
+import { fetchOrders } from "@/lib/order-store";
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -16,63 +18,27 @@ export async function GET(req: NextRequest) {
   }
 
   const { searchParams } = req.nextUrl;
-  const status = searchParams.get("status");
-  const paymentStatus = searchParams.get("paymentStatus");
-  const search = searchParams.get("search")?.trim();
+  const status = searchParams.get("status") || undefined;
+  const paymentStatus = searchParams.get("paymentStatus") || undefined;
+  const search = searchParams.get("search")?.trim() || undefined;
   const limit = Math.min(Number(searchParams.get("limit") || 50), 100);
   const page = Math.max(Number(searchParams.get("page") || 1), 1);
-  const skip = (page - 1) * limit;
 
   try {
-    const where: any = {};
-    if (status) {
-      if (status === "PENDING_VERIFICATION") {
-        where.paymentStatus = "PENDING_VERIFICATION";
-      } else {
-        where.status = status;
-      }
-    }
-    if (paymentStatus) {
-      where.paymentStatus = paymentStatus;
-    }
-    if (search) {
-      where.OR = [
-        { orderNumber: { contains: search, mode: "insensitive" } },
-        { customerName: { contains: search, mode: "insensitive" } },
-        { customerPhone: { contains: search, mode: "insensitive" } },
-        { deliveryAddress: { contains: search, mode: "insensitive" } },
-        { paymentReference: { contains: search, mode: "insensitive" } },
-      ];
-    }
-
-    const [orders, totalCount] = await Promise.all([
-      prisma.order.findMany({
-        where,
-        take: limit,
-        skip,
-        orderBy: { createdAt: "desc" },
-        include: {
-          items: true,
-          assignedStaff: { select: { id: true, name: true, email: true } },
-          customer: { select: { id: true, name: true, phone: true, address: true } },
-        },
-      }),
-      prisma.order.count({ where }),
-    ]);
-
+    const result = await fetchOrders({ status, paymentStatus, search, limit, page });
     return Response.json({
       ok: true,
-      orders,
+      orders: result.orders,
       pagination: {
-        total: totalCount,
-        page,
-        limit,
-        totalPages: Math.ceil(totalCount / limit),
+        total: result.totalCount,
+        page: result.page,
+        limit: result.limit,
+        totalPages: result.totalPages,
       },
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error("[orders GET] error:", error);
-    return Response.json({ ok: false, error: "Failed to fetch orders." }, { status: 500 });
+    return Response.json({ ok: false, error: error?.message || "Failed to fetch orders." }, { status: 500 });
   }
 }
 

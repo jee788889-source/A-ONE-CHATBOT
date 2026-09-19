@@ -4,6 +4,8 @@ import { canAccessAdmin, logAuditEvent } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { clientIp } from "@/lib/api";
 
+import { fetchConversations } from "@/lib/conversation-store";
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -18,64 +20,11 @@ export async function GET(req: NextRequest) {
   const search = searchParams.get("search")?.trim();
 
   try {
-    const where: any = {};
-    if (status) {
-      where.status = status;
-    }
-    if (search) {
-      where.customer = {
-        OR: [
-          { name: { contains: search, mode: "insensitive" } },
-          { phone: { contains: search, mode: "insensitive" } },
-        ],
-      };
-    }
-
-    const conversations = await prisma.conversation.findMany({
-      where,
-      orderBy: { lastMessageAt: "desc" },
-      include: {
-        customer: {
-          include: {
-            orders: {
-              orderBy: { createdAt: "desc" },
-              take: 5,
-              include: { items: true },
-            },
-          },
-        },
-        assignedStaff: { select: { id: true, name: true } },
-        messages: {
-          orderBy: { createdAt: "desc" },
-          take: 1,
-        },
-      },
-    });
-
-    const formatted = conversations.map((conv) => ({
-      id: conv.id,
-      customerId: conv.customerId,
-      customerPhone: conv.customer.phone,
-      customerName: conv.customer.name,
-      customerAddress: conv.customer.address,
-      customerNotes: conv.customer.notes,
-      totalOrders: conv.customer.totalOrders,
-      totalSpent: conv.customer.totalSpent,
-      recentOrders: conv.customer.orders || [],
-      channel: conv.channel,
-      status: conv.status,
-      assignedStaffId: conv.assignedStaffId,
-      assignedStaffName: conv.assignedStaff?.name || null,
-      unreadCount: conv.unreadCount,
-      lastMessageAt: conv.lastMessageAt,
-      lastMessageContent: conv.messages[0]?.content || "No messages yet",
-      createdAt: conv.createdAt,
-    }));
-
-    return Response.json({ ok: true, conversations: formatted });
-  } catch (error) {
+    const conversations = await fetchConversations(status, search);
+    return Response.json({ ok: true, conversations });
+  } catch (error: any) {
     console.error("[conversations GET] error:", error);
-    return Response.json({ ok: false, error: "Failed to fetch conversations." }, { status: 500 });
+    return Response.json({ ok: false, error: error?.message || "Failed to fetch conversations." }, { status: 500 });
   }
 }
 
