@@ -22,7 +22,7 @@ export function ActivityComposer({
   entityId,
   department,
 }: {
-  entityType: "MarketingLead" | "Admission" | "Customer" | "Student" | "Ticket" | "Project";
+  entityType: "Order" | "Customer" | "MenuItem" | "Staff";
   entityId: string;
   department: Department;
 }) {

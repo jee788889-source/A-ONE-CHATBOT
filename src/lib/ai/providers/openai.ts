@@ -1,29 +1,19 @@
 import { config } from "@/lib/config";
 import type { AIProvider, ChatTurn } from "../types";
 
-/**
- * OpenAI-compatible provider. Works with the OpenAI API and any service that
- * speaks the same `/chat/completions` streaming protocol — Azure OpenAI,
- * Together, OpenRouter, and local Ollama (via its OpenAI-compatible endpoint,
- * e.g. OPENAI_BASE_URL=http://localhost:11434/v1).
- *
- * `isOllama` only relaxes the API-key requirement (Ollama needs none).
- */
 export function createOpenAIProvider(isOllama = false): AIProvider {
-  const baseUrl = config.ai.openaiBaseUrl.replace(/\/$/, "");
-  const apiKey = config.ai.openaiApiKey;
+  const baseUrl = "https://api.openai.com/v1";
+  const apiKey = config.ai.openaiKey;
 
   if (!apiKey && !isOllama) {
-    throw new Error(
-      "OPENAI_API_KEY is not set. Configure it in .env or switch AI_PROVIDER."
-    );
+    throw new Error("OPENAI_API_KEY is not set.");
   }
 
   return {
     name: isOllama ? "ollama" : "openai",
     async *streamChat({ system, messages }) {
       const body = {
-        model: config.ai.model,
+        model: config.ai.model || "gpt-4o",
         stream: true,
         max_tokens: config.ai.maxTokens,
         messages: [
@@ -43,7 +33,7 @@ export function createOpenAIProvider(isOllama = false): AIProvider {
 
       if (!res.ok || !res.body) {
         const detail = await res.text().catch(() => "");
-        throw new Error(`Upstream provider error (${res.status}): ${detail.slice(0, 300)}`);
+        throw new Error(`OpenAI error (${res.status}): ${detail.slice(0, 300)}`);
       }
 
       yield* parseSSE(res.body, (json) => json?.choices?.[0]?.delta?.content ?? "");
@@ -51,15 +41,11 @@ export function createOpenAIProvider(isOllama = false): AIProvider {
   };
 }
 
-/**
- * Parse a Server-Sent-Events response body, applying `extract` to each JSON
- * payload and yielding non-empty text chunks. Shared by OpenAI + Gemini.
- */
 export async function* parseSSE(
-  body: ReadableStream<Uint8Array>,
-  extract: (json: any) => string
+  stream: ReadableStream<Uint8Array>,
+  extractor?: (json: any) => string
 ): AsyncGenerator<string, void, unknown> {
-  const reader = body.getReader();
+  const reader = stream.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
 
@@ -74,14 +60,20 @@ export async function* parseSSE(
 
       for (const line of lines) {
         const trimmed = line.trim();
-        if (!trimmed.startsWith("data:")) continue;
-        const data = trimmed.slice(5).trim();
-        if (data === "[DONE]" || data === "") continue;
-        try {
-          const text = extract(JSON.parse(data));
-          if (text) yield text;
-        } catch {
-          // Skip malformed keep-alive / partial frames.
+        if (!trimmed || trimmed.startsWith(":")) continue;
+        if (trimmed.startsWith("data:")) {
+          const data = trimmed.slice(5).trim();
+          if (data === "[DONE]") return;
+          if (extractor) {
+            try {
+              const text = extractor(JSON.parse(data));
+              if (text) yield text;
+            } catch {
+              // ignore invalid json chunks
+            }
+          } else {
+            yield data;
+          }
         }
       }
     }

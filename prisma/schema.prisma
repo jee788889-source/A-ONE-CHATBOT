@@ -1,20 +1,6 @@
 // =============================================================================
-//  BITSOL AI Assistant — Prisma schema
-//  Designed & Developed by BITSOL MARKETING
-//
-//  One database, two strictly separated businesses:
-//
-//    • BITSOL Marketing — leads, services, customers, projects, quotes
-//    • BITSOL Institute of Digital Media & AI — admissions, students, courses,
-//      faculty, batches, attendance, certificates
-//
-//  Shared infrastructure (users, RBAC, conversations, tickets, notifications,
-//  settings, logs) carries a `department` column wherever a record belongs to
-//  exactly one business, so every query can be scoped and the two pipelines
-//  never bleed into each other.
-//
-//  Table names are mapped to the snake_case collection names in the brief.
-//  Run `prisma migrate dev` to create the tables.
+//  A-ONE Restaurant — Private Management & WhatsApp Chatbot Schema
+//  Copyright (c) A-ONE Restaurant. All rights reserved.
 // =============================================================================
 
 generator client {
@@ -22,1271 +8,356 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  // Pooled connection (PgBouncer) — used by the running application, which
-  // opens and closes many short-lived connections.
-  url      = env("DATABASE_URL")
-  // Direct, unpooled connection — required for migrations, which need session
-  // state that a transaction-mode pooler does not preserve. Falls back to
-  // DATABASE_URL when unset, so a plain non-pooled setup still works.
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
   directUrl = env("DIRECT_DATABASE_URL")
 }
 
 // ---------------------------------------------------------------- Enums -----
 
-/// The two businesses the assistant routes between.
-enum Department {
-  MARKETING
-  INSTITUTE
+enum Role {
+  OWNER
+  MANAGER
+  STAFF
 }
 
-enum Language {
-  EN
-  UR
-  UR_ROMAN
-  PA
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  INVITED
 }
 
-/// Where a conversation is physically taking place. The assistant, the routing
-/// and both knowledge bases are identical across channels — only the transport
-/// and the way structured data is collected differ (the web chat opens a form,
-/// WhatsApp asks one question at a time).
 enum Channel {
+  WHATSAPP
   WEB
-  WHATSAPP
 }
 
-/// Coarse access tier. Fine-grained rights live in Role/Permission.
-enum UserRole {
-  GUEST
-  CUSTOMER
-  STUDENT
-  AGENT
-  INSTRUCTOR
-  ADMIN
-  SUPER_ADMIN
-}
-
-enum ChatRole {
-  USER
-  ASSISTANT
-  SYSTEM
-}
-
-enum LeadSource {
-  CHATBOT
-  WHATSAPP
-  WEBSITE
-  REFERRAL
-  WALK_IN
-  SOCIAL
-  PHONE
-  OTHER
-}
-
-enum Priority {
-  LOW
-  NORMAL
-  HIGH
-  URGENT
-}
-
-/// BITSOL Marketing sales pipeline.
-enum LeadStage {
-  NEW
-  CONTACTED
-  QUALIFIED
-  PROPOSAL_SENT
-  NEGOTIATION
-  WON
-  LOST
-}
-
-/// BITSOL Institute admissions pipeline.
-enum AdmissionStage {
-  INQUIRY
-  CONTACTED
-  COUNSELLED
-  APPLIED
-  FEE_PENDING
-  ENROLLED
-  DROPPED
-  LOST
-}
-
-enum TicketStatus {
+enum ConversationStatus {
   OPEN
-  IN_PROGRESS
-  WAITING_CUSTOMER
+  PENDING
   RESOLVED
   CLOSED
 }
 
-enum TicketCategory {
-  TECHNICAL
-  BILLING
-  SALES
-  COMPLAINT
-  GENERAL
+enum MessageRole {
+  USER
+  ASSISTANT
+  STAFF
+  SYSTEM
 }
 
-enum MeetingMode {
-  OFFICE
-  ZOOM
-  GOOGLE_MEET
-  WHATSAPP
-}
-
-enum MeetingStatus {
-  REQUESTED
-  CONFIRMED
-  RESCHEDULED
-  COMPLETED
-  CANCELLED
-  NO_SHOW
-}
-
-enum QuoteStatus {
-  DRAFT
-  SENT
-  ACCEPTED
-  REJECTED
-  EXPIRED
-}
-
-enum ProjectStatus {
-  DISCOVERY
-  IN_PROGRESS
-  REVIEW
-  DELIVERED
-  ON_HOLD
-  CANCELLED
-}
-
-enum BatchStatus {
-  PLANNED
-  ENROLLING
-  RUNNING
-  COMPLETED
-  CANCELLED
-}
-
-enum EnrollmentStatus {
-  ACTIVE
-  COMPLETED
-  DROPPED
-  SUSPENDED
-}
-
-enum AttendanceStatus {
-  PRESENT
-  ABSENT
-  LATE
-  EXCUSED
-}
-
-enum FeeStatus {
-  PENDING
-  PARTIAL
-  PAID
-  OVERDUE
-  WAIVED
-}
-
-enum KnowledgeKind {
-  FAQ
-  ARTICLE
-  SERVICE
-  COURSE
-  POLICY
-  DOCUMENT
-}
-
-enum PublishState {
-  DRAFT
-  PUBLISHED
-  ARCHIVED
-}
-
-enum MediaKind {
+enum MessageType {
+  TEXT
+  MENU
+  ORDER_SUMMARY
   IMAGE
-  DOCUMENT
-  VIDEO
-  AUDIO
-  OTHER
+  LOCATION
+  TEMPLATE
 }
 
-enum ActivityType {
-  NOTE
-  FOLLOW_UP
-  REMINDER
-  CALL
-  EMAIL
-  WHATSAPP
-  MEETING
-  STAGE_CHANGE
-}
-
-enum NotificationChannel {
-  EMAIL
-  SMS
-  WHATSAPP
-  PUSH
-  IN_APP
-}
-
-enum NotificationStatus {
-  QUEUED
-  SENT
-  FAILED
-  READ
-}
-
-enum BroadcastStatus {
-  DRAFT
-  SCHEDULED
-  SENDING
-  SENT
-  FAILED
-}
-
-/// Lifecycle of a message template, mirroring Meta's own review states.
-///
-/// `DRAFT` is the one state Meta does not have: a template written here but
-/// never submitted for approval. Everything from `PENDING` onwards is Meta's
-/// verdict, refreshed by a sync — and only `APPROVED` may actually be sent.
-enum TemplateStatus {
-  DRAFT
-  PENDING
-  APPROVED
-  REJECTED
-  PAUSED
-  DISABLED
-}
-
-/// Meta's template categories. The category decides which pricing conversation
-/// the template opens, and Meta will not let it change after approval.
-enum TemplateCategory {
-  MARKETING
-  UTILITY
-  AUTHENTICATION
-}
-
-/// Per-recipient delivery state inside a broadcast.
-///
-/// `SENT` means Meta accepted the message, which is not the same as it having
-/// arrived — `DELIVERED` and `READ` are set only when Meta's webhook says so.
-enum BroadcastRecipientStatus {
-  PENDING
+enum MessageStatus {
   SENT
   DELIVERED
   READ
   FAILED
-  SKIPPED
 }
 
-enum LogLevel {
-  DEBUG
-  INFO
-  WARN
-  ERROR
+enum OrderStatus {
+  NEW
+  CONFIRMED
+  PREPARING
+  READY
+  OUT_FOR_DELIVERY
+  COMPLETED
+  CANCELLED
 }
 
-// -------------------------------------------------- Identity & access --------
+enum OrderType {
+  DELIVERY
+  PICKUP
+  DINE_IN
+}
 
+enum PaymentStatus {
+  PENDING
+  PENDING_VERIFICATION
+  PAID
+  CASH_ON_DELIVERY
+  FAILED
+  REJECTED
+}
+
+// ---------------------------------------------------------------- Models ----
+
+/// Staff accounts managed directly by the Owner. No public registration.
 model User {
-  id           String    @id @default(cuid())
+  id           String     @id @default(cuid())
+  email        String     @unique
+  passwordHash String
   name         String
-  email        String?   @unique
-  phone        String?   @unique
-  cnic         String?   @unique
-  passwordHash String?
-  role         UserRole  @default(GUEST)
-  /// Which business this staff member works for. Null = both (super admin).
-  department   Department?
-  language     Language  @default(EN)
+  phone        String?
+  role         Role       @default(STAFF)
+  status       UserStatus @default(ACTIVE)
   avatarUrl    String?
-  isActive     Boolean   @default(true)
-  lastLoginAt  DateTime?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  lastActiveAt DateTime?
+  invitedBy    String?
+  permissions  String[]   @default([])
 
-  roleId String?
-  rbac   Role?   @relation(fields: [roleId], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  conversations     Conversation[]
-  assignedLeads     MarketingLead[]  @relation("LeadOwner")
-  assignedAdmission Admission[]      @relation("AdmissionOwner")
-  assignedTickets   Ticket[]         @relation("TicketAssignee")
-  reportedTickets   Ticket[]         @relation("TicketReporter")
-  hostedMeetings    Meeting[]        @relation("MeetingHost")
-  activities        CrmActivity[]    @relation("ActivityOwner")
-  notifications     Notification[]
-  systemLogs        SystemLog[]
-  broadcasts        Broadcast[]      @relation("BroadcastAuthor")
-  customer          Customer?
-  student           Student?
-  faculty           Faculty?
+  assignedConversations Conversation[]
+  assignedOrders        Order[]
+  auditLogs             AuditLog[]
+  notifications         Notification[]
 
+  @@index([email])
   @@index([role])
-  @@index([department])
+  @@index([status])
   @@map("users")
 }
 
-/// Named role in the RBAC matrix, e.g. "Admissions Officer".
-model Role {
-  id          String  @id @default(cuid())
-  key         String  @unique
-  name        String
-  description String?
-  /// Restricts the role to one business; null = applies to both.
-  department  Department?
-  /// System roles cannot be deleted from the admin console.
-  isSystem    Boolean @default(false)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  users       User[]
-  permissions RolePermission[]
-
-  @@map("roles")
-}
-
-/// A single capability, e.g. `crm.leads.update`.
-model Permission {
-  id          String  @id @default(cuid())
-  key         String  @unique
-  group       String
-  description String?
-  createdAt   DateTime @default(now())
-
-  roles RolePermission[]
-
-  @@index([group])
-  @@map("permissions")
-}
-
-model RolePermission {
-  roleId       String
-  permissionId String
-  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
-  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
-
-  @@id([roleId, permissionId])
-  @@map("role_permissions")
-}
-
-// ------------------------------------------------------------ Conversations --
-
-model Conversation {
-  id        String      @id @default(cuid())
-  reference String      @unique
-  /// Which surface this thread arrived on — the web widget or WhatsApp.
-  channel   Channel     @default(WEB)
-  /// Null until the visitor picks a business; set on the first routed turn.
-  department Department?
-  userId    String?
-  user      User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
-  title     String?
-  language  Language    @default(EN)
-  summary   String?
-  /// WhatsApp sender (E.164 without `+`, as Meta reports it). Null on the web.
-  contactPhone String?
-  /// WhatsApp profile name, so the console shows a person rather than a number.
-  contactName  String?
-  /// In-progress slot filling for channels that have no forms. Shape:
-  /// `{ flow, step, answers, startedAt }` — see `lib/whatsapp/capture.ts`.
-  capture   Json?
-  /// Set when a human takes over from the assistant.
-  handedOff Boolean     @default(false)
-  /// 1–5 rating captured by the chat satisfaction widget.
-  rating    Int?
-  createdAt DateTime    @default(now())
-  updatedAt DateTime    @updatedAt
-
-  messages   Message[]
-  tickets    Ticket[]
-  leads      MarketingLead[]
-  admissions Admission[]
-  meetings   Meeting[]
-
-  @@index([userId])
-  @@index([department])
-  @@index([createdAt])
-  @@index([channel, contactPhone, updatedAt])
-  @@map("conversations")
-}
-
-model Message {
-  id             String       @id @default(cuid())
-  conversationId String
-  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  role           ChatRole
-  content        String
-  department     Department?
-  language       Language?
-  tokens         Int?
-  latencyMs      Int?
-  /// Provider message id (WhatsApp `wamid.…`). Unique, which is what makes
-  /// webhook redelivery idempotent: Meta retries until it sees a 200, and a
-  /// retry then fails the insert instead of answering the customer twice.
-  externalId     String?      @unique
-  createdAt      DateTime     @default(now())
-
-  @@index([conversationId])
-  @@map("messages")
-}
-
-// ================================================================ MARKETING ==
-
-model MarketingLead {
-  id           String     @id @default(cuid())
-  reference    String     @unique
-  name         String
-  company      String?
-  phone        String
-  email        String?
-  businessType String?
-  /// Slug of the requested service (see marketing_services).
-  serviceSlug  String?
-  budget       String?
-  timeline     String?
-  requirements String
-  source       LeadSource @default(CHATBOT)
-  stage        LeadStage  @default(NEW)
-  priority     Priority   @default(NORMAL)
-  estimatedValue Decimal? @db.Decimal(12, 2)
-  lostReason   String?
-  ownerId      String?
-  owner        User?      @relation("LeadOwner", fields: [ownerId], references: [id], onDelete: SetNull)
-  conversationId String?
-  conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
-  customerId   String?
-  customer     Customer?  @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
-
-  quotes   Quote[]
-  meetings Meeting[]
-
-  @@index([stage])
-  @@index([createdAt])
-  @@index([ownerId])
-  @@map("marketing_leads")
-}
-
-model MarketingService {
-  id          String  @id @default(cuid())
-  slug        String  @unique
-  name        String
-  group       String
-  tagline     String
-  overview    String
-  benefits    String[]
-  features    String[]
-  process     String[]
-  /// Placeholder pricing until the final rate card is published.
-  priceFrom   String?
-  priceModel  String?
-  priceNote   String?
-  isActive    Boolean @default(true)
-  sortOrder   Int     @default(0)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  portfolio PortfolioItem[]
-  projects  Project[]
-
-  @@index([group])
-  @@map("marketing_services")
-}
-
+/// Customers ordering or chatting via WhatsApp or Web.
 model Customer {
-  id         String   @id @default(cuid())
-  reference  String   @unique
-  name       String
-  company    String?
-  phone      String
-  email      String?
-  address    String?
-  city       String?
-  industry   String?
-  notes      String?
-  isActive   Boolean  @default(true)
-  userId     String?  @unique
-  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id          String   @id @default(cuid())
+  phone       String   @unique
+  name        String?
+  email       String?
+  address     String?
+  notes       String?
+  totalOrders Int      @default(0)
+  totalSpent  Float    @default(0)
 
-  leads    MarketingLead[]
-  projects Project[]
-  quotes   Quote[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  @@index([name])
+  conversations Conversation[]
+  orders        Order[]
+
+  @@index([phone])
   @@map("customers")
 }
 
-model Project {
-  id          String        @id @default(cuid())
-  reference   String        @unique
-  title       String
-  summary     String?
-  status      ProjectStatus @default(DISCOVERY)
-  startDate   DateTime?
-  dueDate     DateTime?
-  deliveredAt DateTime?
-  value       Decimal?      @db.Decimal(12, 2)
-  customerId  String?
-  customer    Customer?     @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  serviceId   String?
-  service     MarketingService? @relation(fields: [serviceId], references: [id], onDelete: SetNull)
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+/// WhatsApp and Web chat sessions.
+model Conversation {
+  id              String             @id @default(cuid())
+  customerId      String
+  customer        Customer           @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  channel         Channel            @default(WHATSAPP)
+  status          ConversationStatus @default(OPEN)
+  assignedStaffId String?
+  assignedStaff   User?              @relation(fields: [assignedStaffId], references: [id], onDelete: SetNull)
+  unreadCount     Int                @default(0)
+  lastMessageAt   DateTime           @default(now())
 
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messages Message[]
+  orders   Order[]
+
+  @@index([customerId])
   @@index([status])
-  @@map("projects")
+  @@index([assignedStaffId])
+  @@index([lastMessageAt])
+  @@map("conversations")
 }
 
-model Quote {
-  id          String      @id @default(cuid())
-  reference   String      @unique
-  title       String
-  status      QuoteStatus @default(DRAFT)
-  currency    String      @default("PKR")
-  subtotal    Decimal     @default(0) @db.Decimal(12, 2)
-  discount    Decimal     @default(0) @db.Decimal(12, 2)
-  tax         Decimal     @default(0) @db.Decimal(12, 2)
-  total       Decimal     @default(0) @db.Decimal(12, 2)
-  /// Line items: [{ description, quantity, unitPrice }]
-  items       Json?
-  notes       String?
-  validUntil  DateTime?
-  sentAt      DateTime?
-  decidedAt   DateTime?
-  leadId      String?
-  lead        MarketingLead? @relation(fields: [leadId], references: [id], onDelete: SetNull)
-  customerId  String?
-  customer    Customer?   @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+/// Inbound and outbound chat messages.
+model Message {
+  id                String        @id @default(cuid())
+  conversationId    String
+  conversation      Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  role              MessageRole
+  content           String        @db.Text
+  messageType       MessageType   @default(TEXT)
+  whatsappMessageId String?       @unique
+  status            MessageStatus @default(SENT)
+  mediaUrl          String?
+  metadata          Json?
 
-  @@index([status])
-  @@map("quotes")
-}
+  createdAt DateTime @default(now())
 
-model PortfolioItem {
-  id          String     @id @default(cuid())
-  slug        String     @unique
-  department  Department @default(MARKETING)
-  title       String
-  client      String?
-  summary     String
-  outcome     String?
-  imageUrl    String?
-  link        String?
-  tags        String[]
-  serviceId   String?
-  service     MarketingService? @relation(fields: [serviceId], references: [id], onDelete: SetNull)
-  isPublished Boolean    @default(true)
-  sortOrder   Int        @default(0)
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
-
-  @@index([department])
-  @@map("portfolio_items")
-}
-
-model Review {
-  id          String     @id @default(cuid())
-  department  Department
-  author      String
-  role        String?
-  company     String?
-  rating      Int        @default(5)
-  body        String
-  isPublished Boolean    @default(true)
-  createdAt   DateTime   @default(now())
-
-  @@index([department])
-  @@map("reviews")
-}
-
-// ================================================================ INSTITUTE ==
-
-model Course {
-  id            String   @id @default(cuid())
-  slug          String   @unique
-  name          String
-  group         String
-  tagline       String
-  overview      String
-  curriculum    String[]
-  duration      String
-  /// Placeholder fee until the admissions office confirms the rate card.
-  feeFrom       String?
-  feeModel      String?
-  feeNote       String?
-  instalments   Json?
-  careers       String[]
-  projects      String[]
-  certification String
-  eligibility   String?
-  isActive      Boolean  @default(true)
-  sortOrder     Int      @default(0)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-
-  facultyId String?
-  faculty   Faculty? @relation(fields: [facultyId], references: [id], onDelete: SetNull)
-
-  batches    Batch[]
-  admissions Admission[]
-
-  @@index([group])
-  @@map("courses")
-}
-
-model Faculty {
-  id         String   @id @default(cuid())
-  reference  String   @unique
-  name       String
-  title      String
-  bio        String?
-  expertise  String[]
-  photoUrl   String?
-  email      String?
-  phone      String?
-  isActive   Boolean  @default(true)
-  userId     String?  @unique
-  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-
-  courses Course[]
-  batches Batch[]
-
-  @@map("faculty")
-}
-
-model Batch {
-  id         String      @id @default(cuid())
-  code       String      @unique
-  courseId   String
-  course     Course      @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  facultyId  String?
-  faculty    Faculty?    @relation(fields: [facultyId], references: [id], onDelete: SetNull)
-  status     BatchStatus @default(PLANNED)
-  startDate  DateTime
-  endDate    DateTime?
-  /// Human-readable timetable, e.g. "Mon/Wed/Fri · 6:00–8:00 PM".
-  schedule   String
-  mode       String      @default("On-campus")
-  seats      Int         @default(25)
-  seatsTaken Int         @default(0)
-  room       String?
-  createdAt  DateTime    @default(now())
-  updatedAt  DateTime    @updatedAt
-
-  enrollments Enrollment[]
-  attendance  Attendance[]
-  assignments Assignment[]
-  admissions  Admission[]
-
-  @@index([status])
-  @@index([startDate])
-  @@map("batches")
-}
-
-model Admission {
-  id             String         @id @default(cuid())
-  reference      String         @unique
-  studentName    String
-  fatherName     String?
-  phone          String
-  whatsapp       String?
-  email          String?
-  qualification  String?
-  city           String?
-  courseId       String?
-  course         Course?        @relation(fields: [courseId], references: [id], onDelete: SetNull)
-  /// Free-text course name when the inquiry predates the catalogue entry.
-  courseName     String?
-  preferredBatch String?
-  batchId        String?
-  batch          Batch?         @relation(fields: [batchId], references: [id], onDelete: SetNull)
-  source         LeadSource     @default(CHATBOT)
-  stage          AdmissionStage @default(INQUIRY)
-  priority       Priority       @default(NORMAL)
-  notes          String?
-  lostReason     String?
-  ownerId        String?
-  owner          User?          @relation("AdmissionOwner", fields: [ownerId], references: [id], onDelete: SetNull)
-  conversationId String?
-  conversation   Conversation?  @relation(fields: [conversationId], references: [id], onDelete: SetNull)
-  studentId      String?
-  student        Student?       @relation(fields: [studentId], references: [id], onDelete: SetNull)
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
-
-  @@index([stage])
+  @@index([conversationId])
+  @@index([whatsappMessageId])
   @@index([createdAt])
-  @@index([ownerId])
-  @@map("admissions")
+  @@map("messages")
 }
 
-model Student {
-  id            String   @id @default(cuid())
-  rollNumber    String   @unique
-  name          String
-  fatherName    String?
-  phone         String
-  whatsapp      String?
-  email         String?
-  cnic          String?
-  city          String?
-  qualification String?
-  photoUrl      String?
-  isActive      Boolean  @default(true)
-  userId        String?  @unique
-  user          User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-
-  admissions   Admission[]
-  enrollments  Enrollment[]
-  attendance   Attendance[]
-  certificates Certificate[]
-  submissions  Submission[]
-
-  @@index([name])
-  @@map("students")
-}
-
-model Enrollment {
-  id         String           @id @default(cuid())
-  reference  String           @unique
-  studentId  String
-  student    Student          @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  batchId    String
-  batch      Batch            @relation(fields: [batchId], references: [id], onDelete: Cascade)
-  status     EnrollmentStatus @default(ACTIVE)
-  feeStatus  FeeStatus        @default(PENDING)
-  feeTotal   Decimal?         @db.Decimal(10, 2)
-  feePaid    Decimal          @default(0) @db.Decimal(10, 2)
-  /// Instalment ledger: [{ label, dueDate, amount, paidAt }]
-  feePlan    Json?
-  grade      String?
-  enrolledAt DateTime         @default(now())
-  completedAt DateTime?
-  updatedAt  DateTime         @updatedAt
-
-  @@unique([studentId, batchId])
-  @@index([status])
-  @@map("enrollments")
-}
-
-model Attendance {
-  id        String           @id @default(cuid())
-  studentId String
-  student   Student          @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  batchId   String
-  batch     Batch            @relation(fields: [batchId], references: [id], onDelete: Cascade)
-  date      DateTime         @db.Date
-  status    AttendanceStatus @default(PRESENT)
-  remarks   String?
-  createdAt DateTime         @default(now())
-
-  @@unique([studentId, batchId, date])
-  @@index([date])
-  @@map("attendance")
-}
-
-model Assignment {
-  id          String   @id @default(cuid())
-  title       String
-  brief       String
-  batchId     String
-  batch       Batch    @relation(fields: [batchId], references: [id], onDelete: Cascade)
-  dueDate     DateTime?
-  maxScore    Int      @default(100)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  submissions Submission[]
-
-  @@map("assignments")
-}
-
-model Submission {
+/// Menu Categories (e.g. Burgers, Biryani, BBQ, Fast Food, Drinks, Desserts).
+model MenuCategory {
   id           String   @id @default(cuid())
-  assignmentId String
-  assignment   Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
-  studentId    String
-  student      Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  fileUrl      String?
-  notes        String?
-  score        Int?
-  feedback     String?
-  submittedAt  DateTime @default(now())
+  name         String
+  urduName     String?
+  description  String?
+  displayOrder Int      @default(0)
+  isActive     Boolean  @default(true)
 
-  @@unique([assignmentId, studentId])
-  @@map("submissions")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items MenuItem[]
+
+  @@index([isActive])
+  @@index([displayOrder])
+  @@map("menu_categories")
 }
 
-model Certificate {
-  id         String   @id @default(cuid())
-  reference  String   @unique
-  studentId  String
-  student    Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  courseName String
-  batchCode  String?
-  grade      String?
-  issuedAt   DateTime @default(now())
-  fileUrl    String?
-  /// Public verification code printed on the certificate.
-  verifyCode String   @unique
+/// Menu Items available for ordering.
+model MenuItem {
+  id              String       @id @default(cuid())
+  categoryId      String
+  category        MenuCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  name            String
+  urduName        String?
+  description     String?      @db.Text
+  price           Float
+  imageUrl        String?
+  isAvailable     Boolean      @default(true)
+  isFeatured      Boolean      @default(false)
+  displayOrder    Int          @default(0)
+  preparationTime Int?         @default(15)
 
-  @@index([studentId])
-  @@map("certificates")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  orderItems OrderItem[]
+
+  @@index([categoryId])
+  @@index([isAvailable])
+  @@index([isFeatured])
+  @@map("menu_items")
 }
 
-// ========================================================= KNOWLEDGE BASES ==
-//  Two physically separate tables. Keeping them apart is what makes the
-//  "never mix business information" rule structural rather than a convention:
-//  a marketing query can only ever read `knowledge_base_marketing`.
-
-model MarketingKnowledge {
-  id          String        @id @default(cuid())
-  slug        String        @unique
-  kind        KnowledgeKind @default(FAQ)
-  category    String
-  question    String
-  answer      String
-  keywords    String[]
-  language    Language      @default(EN)
-  state       PublishState  @default(PUBLISHED)
-  /// Bumped on every edit; the AI index is rebuilt from the latest version.
-  version     Int           @default(1)
-  indexedAt   DateTime?
-  sortOrder   Int           @default(0)
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
-
-  @@index([category])
-  @@index([state])
-  @@map("knowledge_base_marketing")
-}
-
-model InstituteKnowledge {
-  id          String        @id @default(cuid())
-  slug        String        @unique
-  kind        KnowledgeKind @default(FAQ)
-  category    String
-  question    String
-  answer      String
-  keywords    String[]
-  language    Language      @default(EN)
-  state       PublishState  @default(PUBLISHED)
-  version     Int           @default(1)
-  indexedAt   DateTime?
-  sortOrder   Int           @default(0)
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
-
-  @@index([category])
-  @@index([state])
-  @@map("knowledge_base_institute")
-}
-
-/// Documents, downloads and images referenced by either knowledge base.
-model MediaAsset {
-  id          String     @id @default(cuid())
-  department  Department
-  kind        MediaKind  @default(DOCUMENT)
-  title       String
-  description String?
-  url         String
-  mimeType    String?
-  sizeBytes   Int?
-  /// Exposed on the public "Downloads" menu when true.
-  isDownload  Boolean    @default(false)
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
-
-  @@index([department])
-  @@map("media_assets")
-}
-
-// ============================================================ SHARED OPS ====
-
-model Ticket {
-  id             String         @id @default(cuid())
-  reference      String         @unique
-  department     Department
-  category       TicketCategory @default(GENERAL)
-  status         TicketStatus   @default(OPEN)
-  priority       Priority       @default(NORMAL)
-  subject        String
-  description    String
-  contactName    String?
-  contactPhone   String?
-  contactEmail   String?
-  resolution     String?
-  resolvedAt     DateTime?
-  reporterId     String?
-  reporter       User?          @relation("TicketReporter", fields: [reporterId], references: [id], onDelete: SetNull)
-  assigneeId     String?
-  assignee       User?          @relation("TicketAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
-  conversationId String?
-  conversation   Conversation?  @relation(fields: [conversationId], references: [id], onDelete: SetNull)
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
-
-  @@index([status])
-  @@index([department])
-  @@map("tickets")
-}
-
-model Meeting {
+/// Food orders received via WhatsApp or staff entry.
+model Order {
   id             String        @id @default(cuid())
-  reference      String        @unique
-  department     Department
-  name           String
-  phone          String
-  email          String?
-  businessName   String?
-  topic          String?
-  mode           MeetingMode   @default(ZOOM)
-  status         MeetingStatus @default(REQUESTED)
-  preferredDate  DateTime      @db.Date
-  preferredTime  String
-  confirmedAt    DateTime?
-  meetingLink    String?
-  notes          String?
-  hostId         String?
-  host           User?         @relation("MeetingHost", fields: [hostId], references: [id], onDelete: SetNull)
-  leadId         String?
-  lead           MarketingLead? @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  orderNumber    String        @unique
+  customerId     String
+  customer       Customer      @relation(fields: [customerId], references: [id], onDelete: Restrict)
   conversationId String?
   conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
 
+  status        OrderStatus   @default(NEW)
+  orderType     OrderType     @default(DELIVERY)
+  paymentStatus PaymentStatus @default(CASH_ON_DELIVERY)
+
+  subtotal    Float
+  deliveryFee Float @default(0)
+  discount    Float @default(0)
+  total       Float
+
+  customerName    String
+  customerPhone   String
+  deliveryAddress String? @db.Text
+  notes           String? @db.Text
+
+  paymentMethod     String?   @default("CASH_ON_DELIVERY")
+  paymentReference  String?
+  paymentScreenshot String?
+  paymentVerifiedBy String?
+  paymentVerifiedAt DateTime?
+  paymentNotes      String?
+
+  assignedStaffId String?
+  assignedStaff   User?   @relation(fields: [assignedStaffId], references: [id], onDelete: SetNull)
+
+  estimatedDeliveryAt DateTime?
+  deliveredAt         DateTime?
+  cancelledReason     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items OrderItem[]
+
+  @@index([orderNumber])
+  @@index([customerId])
   @@index([status])
-  @@index([preferredDate])
-  @@map("meetings")
+  @@index([orderType])
+  @@index([createdAt])
+  @@map("orders")
 }
 
-/// Polymorphic CRM timeline: notes, follow-ups, reminders and stage changes
-/// against a lead, admission, customer, student, ticket or project.
-model CrmActivity {
-  id          String       @id @default(cuid())
-  department  Department
-  type        ActivityType @default(NOTE)
-  /// "MarketingLead" | "Admission" | "Customer" | "Student" | "Ticket" | "Project"
-  entityType  String
-  entityId    String
-  body        String
-  dueAt       DateTime?
-  completedAt DateTime?
-  ownerId     String?
-  owner       User?        @relation("ActivityOwner", fields: [ownerId], references: [id], onDelete: SetNull)
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+/// Line items in an order.
+model OrderItem {
+  id         String    @id @default(cuid())
+  orderId    String
+  order      Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  menuItemId String?
+  menuItem   MenuItem? @relation(fields: [menuItemId], references: [id], onDelete: SetNull)
 
-  @@index([entityType, entityId])
-  @@index([dueAt])
-  @@map("crm_activities")
+  itemName  String
+  unitPrice Float
+  quantity  Int
+  subtotal  Float
+  notes     String?
+
+  @@index([orderId])
+  @@map("order_items")
 }
 
-model Event {
-  id          String     @id @default(cuid())
-  slug        String     @unique
-  department  Department
-  title       String
-  summary     String
-  location    String?
-  startsAt    DateTime
-  endsAt      DateTime?
-  registerUrl String?
-  isPublished Boolean    @default(true)
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
+/// Central configuration for A-ONE Restaurant.
+model RestaurantSettings {
+  id                String   @id @default("default")
+  name              String   @default("A-ONE Restaurant")
+  tagline           String   @default("Authentic Taste & Premium Quality")
+  phone             String   @default("+92 300 0000000")
+  email             String   @default("contact@aonefoods.com")
+  address           String   @default("A-ONE Restaurant, Main Boulevard, Pakistan")
+  currency          String   @default("PKR")
+  currencySymbol    String   @default("Rs.")
+  deliveryFee       Float    @default(150)
+  minOrderAmount    Float    @default(500)
+  isAcceptingOrders Boolean  @default(true)
 
-  @@index([department])
-  @@index([startsAt])
-  @@map("events")
+  openingHours     Json     @default("{\"monday\":{\"open\":\"11:00\",\"close\":\"01:00\",\"isOpen\":true},\"tuesday\":{\"open\":\"11:00\",\"close\":\"01:00\",\"isOpen\":true},\"wednesday\":{\"open\":\"11:00\",\"close\":\"01:00\",\"isOpen\":true},\"thursday\":{\"open\":\"11:00\",\"close\":\"01:00\",\"isOpen\":true},\"friday\":{\"open\":\"14:00\",\"close\":\"02:00\",\"isOpen\":true},\"saturday\":{\"open\":\"11:00\",\"close\":\"02:00\",\"isOpen\":true},\"sunday\":{\"open\":\"11:00\",\"close\":\"01:00\",\"isOpen\":true}}")
+  deliverySettings Json     @default("{\"standardDeliveryFee\":150,\"freeDeliveryThreshold\":2000,\"estimatedMinutes\":35,\"allowedAreas\":[\"City Center\",\"Commercial Area\",\"Model Town\",\"Gulberg\",\"DHA\"]}")
+  paymentAccounts  Json     @default("{\"jazzcash\":{\"accountTitle\":\"A-ONE Restaurant\",\"accountNumber\":\"0300-1234567\"},\"easypaisa\":{\"accountTitle\":\"A-ONE Restaurant\",\"accountNumber\":\"0321-9876543\"},\"bank\":{\"bankName\":\"Meezan Bank / Alfalah\",\"accountTitle\":\"A-ONE Foods PVT LTD\",\"iban\":\"PK00MEZN0000123456789012\"}}")
+  whatsappConfig   Json     @default("{\"welcomeMessage\":\"Welcome to A-ONE Restaurant! 🍔🍕\\nHow may we serve you today?\\nType *Menu* to see our dishes or *Order* to start an order.\",\"autoReplyEnabled\":true,\"fallbackMessage\":\"Thank you for contacting A-ONE Restaurant. A staff member will assist you shortly.\"}")
+  aiSettings       Json     @default("{\"provider\":\"anthropic\",\"model\":\"claude-3-5-sonnet-20241022\",\"temperature\":0.2,\"maxTokens\":500,\"strictGuardrails\":true}")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("restaurant_settings")
 }
 
-model Announcement {
-  id          String      @id @default(cuid())
-  department  Department?
-  title       String
-  body        String
-  isPublished Boolean     @default(true)
-  publishedAt DateTime    @default(now())
-  expiresAt   DateTime?
-  createdAt   DateTime    @default(now())
-
-  @@index([isPublished])
-  @@map("announcements")
-}
-
-/// A person who has messaged the WhatsApp business number.
-///
-/// Kept separate from `users` because a WhatsApp contact is not an account:
-/// it is a phone number with a profile name, which may later become a lead, an
-/// admission inquiry, both, or nothing at all.
-model WhatsappContact {
-  id             String      @id @default(cuid())
-  /// Meta's `wa_id` — E.164 digits with no leading `+`, e.g. `923001234567`.
-  waId           String      @unique
-  /// Same number in display form (`+923001234567`), used in the CRM.
-  phone          String
-  /// Name from the sender's WhatsApp profile, when they have set one.
-  profileName    String?
-  /// Business this contact last spoke to, so returning messages skip the menu.
-  department     Department?
-  lastInboundAt  DateTime?
-  lastOutboundAt DateTime?
-  /// True after the contact sends STOP. Blocks broadcasts, not replies.
-  optedOut       Boolean     @default(false)
-  /// Set by staff to make the assistant ignore a number entirely.
-  isBlocked      Boolean     @default(false)
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
-
-  broadcastRows  BroadcastRecipient[]
-
-  @@index([department])
-  @@index([lastInboundAt])
-  @@map("whatsapp_contacts")
-}
-
-/// A WhatsApp message template, as Meta knows it.
-///
-/// Meta owns the truth here: a template is created in (or synced from) the
-/// WhatsApp Business Account, reviewed, and only then may it be sent. This
-/// table is a local mirror so the console can list, filter and compose against
-/// templates without a Graph call on every page load — `syncedAt` says how
-/// stale that mirror is.
-///
-/// Rows with no `metaId` were written here and never submitted; they are
-/// `DRAFT` and cannot be broadcast.
-model WhatsappTemplate {
-  id          String     @id @default(cuid())
-  /// Local, human-chosen key — what the app's own code refers to a template by
-  /// (`in-fee-reminder`). Independent of Meta's naming rules.
-  key         String     @unique
-  /// The name Meta knows it by: lowercase, digits and underscores only. Unique
-  /// per language in the WhatsApp Business Account, which is why the uniqueness
-  /// constraint below is on the pair and not on the name alone.
-  metaName    String
-  /// Meta's template id, present once the template exists in the WABA.
-  metaId      String?    @unique
-  /// Null for a template synced from Meta that nobody has assigned to a
-  /// business yet — it is visible to both until someone picks one.
-  department  Department?
-  name        String
-  language    Language   @default(EN)
-  /// Meta's own language code (`en`, `en_US`, `ur`). The `language` enum above
-  /// is this product's four languages; Meta's list is far longer, so the code
-  /// that actually goes on the wire is stored separately.
-  languageCode String    @default("en")
-  category    TemplateCategory @default(UTILITY)
-  status      TemplateStatus   @default(DRAFT)
-  /// The BODY component's text, with Meta's `{{1}}` placeholders intact.
-  body        String
-  /// HEADER text, when the header is a text header.
-  headerText  String?
-  /// HEADER format — TEXT, IMAGE, VIDEO, DOCUMENT — or null for no header.
-  headerFormat String?
-  footerText  String?
-  /// The BUTTONS component, verbatim from Meta.
-  buttons     Json?
-  /// Every component exactly as Meta returned it, so a future feature can read
-  /// a field this schema does not model yet without a re-sync.
-  components  Json?
-  /// Placeholder names in order, e.g. ["name", "courseName"]. Purely a label
-  /// for the composer — Meta only ever sees positional parameters.
-  variables   String[]
-  /// Meta's reason when `status` is REJECTED, quoted verbatim for the appeal.
-  rejectedReason String?
-  /// Meta's delivery quality signal (GREEN / YELLOW / RED) once there is data.
-  qualityScore String?
-  /// When this row last matched Meta. Null means it has never been synced.
-  syncedAt    DateTime?
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
-
-  broadcasts Broadcast[]
-
-  @@unique([metaName, languageCode])
-  @@index([department])
-  @@index([status])
-  @@map("whatsapp_templates")
-}
-
-model Broadcast {
-  id          String          @id @default(cuid())
-  reference   String          @unique
-  department  Department
-  channel     NotificationChannel @default(WHATSAPP)
-  status      BroadcastStatus @default(DRAFT)
-  title       String
-  /// The template body with this broadcast's parameters substituted in — what
-  /// a recipient actually reads. Kept as text so the list stays readable even
-  /// after the template is edited or deleted in Meta.
-  body        String
-  /// Saved audience filter, e.g. { stage: "QUALIFIED", courseSlug: "seo" }.
-  audience    Json?
-  templateId  String?
-  template    WhatsappTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
-  /// Template name and language captured at send time. A template can be
-  /// renamed or deleted in Meta; a sent broadcast must still say what it sent.
-  templateName String?
-  languageCode String?
-  /// Public URL of the image, video or document for a template whose header is
-  /// media rather than text. Meta does not keep the picture that was approved —
-  /// the handle in the template is only for review — so a media header has to
-  /// be supplied again on every single send, or Meta rejects the message.
-  headerMediaUrl String?
-  /// How each `{{n}}` was filled: an ordered list of parameter sources, e.g.
-  /// [{ "kind": "contactName" }, { "kind": "static", "value": "20%" }].
-  parameters  Json?
-  scheduledAt DateTime?
-  startedAt   DateTime?
-  sentAt      DateTime?
-  recipients  Int             @default(0)
-  /// Accepted by Meta. Delivery is a separate, later fact — see `delivered`.
-  sent        Int             @default(0)
-  delivered   Int             @default(0)
-  readCount   Int             @default(0)
-  failed      Int             @default(0)
-  /// Why the run stopped, when it stopped badly.
-  error       String?
-  createdById String?
-  createdBy   User?           @relation("BroadcastAuthor", fields: [createdById], references: [id], onDelete: SetNull)
-  createdAt   DateTime        @default(now())
-  updatedAt   DateTime        @updatedAt
-
-  recipientRows BroadcastRecipient[]
-
-  @@index([status])
-  @@map("broadcasts")
-}
-
-/// One row per person a broadcast was sent to.
-///
-/// Counters on `Broadcast` alone cannot answer "did Ali get it?", and Meta's
-/// delivery receipts arrive minutes later on a webhook keyed by message id —
-/// so the message id has to be stored somewhere it can be looked up. This is
-/// that table, and it doubles as the record of who has already been messaged,
-/// which is what makes a resumed or retried run safe.
-model BroadcastRecipient {
-  id          String    @id @default(cuid())
-  broadcastId String
-  broadcast   Broadcast @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
-  contactId   String?
-  contact     WhatsappContact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
-  /// E.164 digits with no leading `+`, as Meta wants them.
-  waId        String
-  phone       String
-  name        String?
-  /// The body parameters actually sent, in order — kept so a failed send can
-  /// be retried without recomputing them from an audience that has moved on.
-  parameters  String[]
-  status      BroadcastRecipientStatus @default(PENDING)
-  /// Meta's `wamid.…`. Unique because it is the key delivery receipts arrive on.
-  messageId   String?   @unique
-  error       String?
-  sentAt      DateTime?
-  deliveredAt DateTime?
-  readAt      DateTime?
-  createdAt   DateTime  @default(now())
-
-  @@unique([broadcastId, waId])
-  @@index([broadcastId, status])
-  @@map("broadcast_recipients")
-}
-
-model Notification {
-  id         String              @id @default(cuid())
-  department Department?
-  channel    NotificationChannel
-  status     NotificationStatus  @default(QUEUED)
-  to         String
-  subject    String?
-  body       String
-  /// Deep link into the admin console, e.g. /admin/crm/leads/<id>.
-  link       String?
-  userId     String?
-  user       User?               @relation(fields: [userId], references: [id], onDelete: SetNull)
-  sentAt     DateTime?
-  error      String?
-  createdAt  DateTime            @default(now())
-
-  @@index([status])
-  @@index([department])
-  @@map("notifications")
-}
-
-/// Key/value application settings edited from Admin → Settings.
-model Setting {
-  id          String      @id @default(cuid())
-  key         String      @unique
-  /// Null for global settings; set for per-business overrides.
-  department  Department?
-  group       String      @default("general")
-  value       Json
-  description String?
-  /// Secrets are write-only in the admin UI (never returned to the client).
-  isSecret    Boolean     @default(false)
-  updatedAt   DateTime    @updatedAt
-
-  @@index([group])
-  @@map("settings")
-}
-
-model SystemLog {
-  id         String      @id @default(cuid())
-  level      LogLevel    @default(INFO)
-  department Department?
+/// Immutable audit log for security, staff actions, and compliance.
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  actor      User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  actorEmail String
   action     String
-  entity     String?
-  entityId   String?
-  message    String?
-  metadata   Json?
+  target     String?
+  details    Json?
   ipAddress  String?
   userAgent  String?
-  userId     String?
-  user       User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
-  createdAt  DateTime    @default(now())
 
+  createdAt DateTime @default(now())
+
+  @@index([actorEmail])
   @@index([action])
   @@index([createdAt])
-  @@index([level])
-  @@map("system_logs")
+  @@map("audit_logs")
 }
 
-/// Daily rollup powering the admin dashboard widgets and reports.
-model AnalyticsDaily {
-  id                String     @id @default(cuid())
-  date              DateTime   @db.Date
-  department        Department?
-  conversations     Int        @default(0)
-  messages          Int        @default(0)
-  leads             Int        @default(0)
-  admissions        Int        @default(0)
-  meetings          Int        @default(0)
-  tickets           Int        @default(0)
-  revenue           Decimal    @default(0) @db.Decimal(12, 2)
-  conversionRate    Float      @default(0)
-  avgResponseMs     Int        @default(0)
-  satisfactionScore Float      @default(0)
-  createdAt         DateTime   @default(now())
+/// Internal notifications for staff & owner.
+model Notification {
+  id      String   @id @default(cuid())
+  userId  String?
+  user    User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title   String
+  message String   @db.Text
+  type    String   @default("INFO")
+  link    String?
+  isRead  Boolean  @default(false)
 
-  @@unique([date, department])
-  @@index([date])
-  @@map("analytics_daily")
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([isRead])
+  @@index([createdAt])
+  @@map("notifications")
 }

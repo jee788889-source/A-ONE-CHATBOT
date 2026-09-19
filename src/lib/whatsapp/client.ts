@@ -35,7 +35,7 @@ function endpoint(path: string): string {
 }
 
 async function post(payload: Record<string, unknown>): Promise<SendResult> {
-  if (!config.whatsapp.enabled) {
+  if (!config.whatsapp.token || !config.whatsapp.phoneId) {
     return { ok: false, error: "WhatsApp is not configured (WHATSAPP_PHONE_ID / WHATSAPP_TOKEN)." };
   }
 

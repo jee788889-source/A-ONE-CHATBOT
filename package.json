@@ -1,9 +1,9 @@
 {
-  "name": "bitsol-ai-assistant",
+  "name": "aone-restaurant-portal",
   "version": "1.0.0",
   "private": true,
-  "description": "BITSOL AI Assistant — one assistant for BITSOL Marketing and BITSOL Institute of Digital Media & Artificial Intelligence. Designed & Developed by BITSOL MARKETING",
-  "author": "BITSOL MARKETING (https://bitsolmarketing.com)",
+  "description": "A-ONE Restaurant — Private WhatsApp Chatbot & Staff Management Portal. Copyright (c) A-ONE Restaurant.",
+  "author": "A-ONE Restaurant (https://www.instagram.com/aone_foods/)",
   "license": "UNLICENSED",
   "scripts": {
     "dev": "next dev",
@@ -22,7 +22,6 @@
   "prisma": {
     "seed": "tsx prisma/seed.ts"
   },
-  "//dependencies": "Anything `next build` needs lives here, not in devDependencies. npm omits devDependencies whenever NODE_ENV=production, and hosting panels apply that variable to the install step as well as the running app — which produces an install that reports success followed by a build that dies on a missing Tailwind plugin. Since this project is built on the host it is deployed to, its build tools are production dependencies in practice. The cost is disk in node_modules; the alternative is a deploy that fails depending on one environment variable.",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.68.0",
     "@prisma/client": "^6.14.0",
@@ -49,6 +48,6 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
-    "tsx": "^4.20.0"
+    "tsx": "^4.19.4"
   }
 }

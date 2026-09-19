@@ -1,15 +1,12 @@
 import type { Metadata } from "next";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { requireAdmin } from "@/lib/session";
-import { loadPermissions, navCounts, sessionDepartment } from "@/lib/admin/queries";
-import type { Department } from "@/lib/brands";
 
 export const metadata: Metadata = {
-  title: { default: "Admin", template: "%s · BITSOL Admin" },
+  title: { default: "Operations Portal", template: "%s · A-ONE Restaurant" },
   robots: { index: false, follow: false },
 };
 
-/** Admin pages read live data on every request. */
 export const dynamic = "force-dynamic";
 
 export default async function AdminLayout({
@@ -17,27 +14,18 @@ export default async function AdminLayout({
 }: {
   children: React.ReactNode;
 }) {
-  // Gate the whole console here so no page can be reached without a session.
   const session = await requireAdmin();
-
-  const [permissions, badges] = await Promise.all([
-    loadPermissions(session),
-    navCounts(session),
-  ]);
-
-  const department = sessionDepartment(session);
 
   return (
     <AdminShell
       user={{
+        id: session.sub,
         name: session.name,
+        email: session.email,
         role: session.role,
-        department: department as Department | null,
+        status: session.status,
       }}
-      // Only serializable values cross into the client component — the nav
-      // tree is built there, since each item carries a Lucide icon function.
-      permissions={permissions ? [...permissions] : null}
-      badges={badges}
+      permissions={session.permissions}
     >
       {children}
     </AdminShell>

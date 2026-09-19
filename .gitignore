@@ -40,4 +40,6 @@ yarn-error.log*
 .vercel
 tsconfig.tsbuildinfo
 .claude/
+test-pg.js
+
 

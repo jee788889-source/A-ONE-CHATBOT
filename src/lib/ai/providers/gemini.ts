@@ -2,23 +2,16 @@ import { config } from "@/lib/config";
 import type { AIProvider } from "../types";
 import { parseSSE } from "./openai";
 
-/**
- * Google Gemini provider via the REST `streamGenerateContent` endpoint with
- * SSE. The Anthropic-style `system` prompt is mapped to Gemini's
- * `systemInstruction`, and turns are mapped to Gemini's `role: user|model`.
- */
 export function createGeminiProvider(): AIProvider {
-  const apiKey = config.ai.geminiApiKey;
+  const apiKey = config.ai.geminiKey;
   if (!apiKey) {
-    throw new Error(
-      "GEMINI_API_KEY is not set. Configure it in .env or switch AI_PROVIDER."
-    );
+    throw new Error("GEMINI_API_KEY is not set.");
   }
 
   return {
     name: "gemini",
     async *streamChat({ system, messages }) {
-      const model = config.ai.model || "gemini-2.0-flash";
+      const model = config.ai.model || "gemini-1.5-pro";
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
         model
       )}:streamGenerateContent?alt=sse`;
@@ -36,8 +29,6 @@ export function createGeminiProvider(): AIProvider {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          // Header rather than a `key=` query parameter: a URL-embedded key
-          // leaks into access logs, proxy logs and any thrown error string.
           "x-goog-api-key": apiKey,
         },
         body: JSON.stringify(body),
@@ -48,13 +39,19 @@ export function createGeminiProvider(): AIProvider {
         throw new Error(`Gemini error (${res.status}): ${detail.slice(0, 300)}`);
       }
 
-      yield* parseSSE(res.body, (json) =>
-        // Gemini may split a single chunk across several parts; taking only
-        // parts[0] silently drops text mid-answer.
-        (json?.candidates?.[0]?.content?.parts ?? [])
-          .map((p: { text?: string }) => p?.text ?? "")
-          .join("")
-      );
+      for await (const data of parseSSE(res.body)) {
+        try {
+          const parsed = JSON.parse(data) as {
+            candidates?: Array<{
+              content?: { parts?: Array<{ text?: string }> };
+            }>;
+          };
+          const text = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (text) yield text;
+        } catch {
+          // ignore incomplete frames
+        }
+      }
     },
   };
 }

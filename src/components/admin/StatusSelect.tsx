@@ -23,12 +23,10 @@ export function StatusSelect({
 }: {
   /** Resource segment on /api/admin/<entity>/<id>. */
   entity:
-    | "leads"
-    | "admissions"
-    | "tickets"
-    | "meetings"
-    | "knowledge-marketing"
-    | "knowledge-institute";
+    | "orders"
+    | "customers"
+    | "menu"
+    | "staff";
   id: string;
   /** Which field this control writes. */
   field: "stage" | "status" | "priority" | "state";

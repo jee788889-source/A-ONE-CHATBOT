@@ -1,6 +1,6 @@
 # =============================================================================
-#  BITSOL AI Assistant — Local / Production compose stack
-#  Designed & Developed by BITSOL MARKETING
+#  A-ONE Restaurant — Local / Production compose stack
+#  Copyright (c) A-ONE Restaurant.
 #
 #  Usage:
 #    cp .env.example .env   # then edit secrets
@@ -12,29 +12,29 @@
 services:
   db:
     image: postgres:16-alpine
-    container_name: bitsol-db
+    container_name: aone-db
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-bitsol}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-bitsol_password}
-      POSTGRES_DB: ${POSTGRES_DB:-bitsol_assistant}
+      POSTGRES_USER: ${POSTGRES_USER:-aone_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aone_secure_password}
+      POSTGRES_DB: ${POSTGRES_DB:-aone_restaurant}
     volumes:
-      - bitsol_pgdata:/var/lib/postgresql/data
+      - aone_pgdata:/var/lib/postgresql/data
     ports:
       - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-bitsol}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aone_user}"]
       interval: 10s
       timeout: 5s
       retries: 5
 
   redis:
     image: redis:7-alpine
-    container_name: bitsol-redis
+    container_name: aone-redis
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
-      - bitsol_redisdata:/data
+      - aone_redisdata:/data
     ports:
       - "6379:6379"
     healthcheck:
@@ -47,7 +47,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: bitsol-web
+    container_name: aone-web
     restart: unless-stopped
     depends_on:
       db:
@@ -56,13 +56,14 @@ services:
         condition: service_healthy
     environment:
       NODE_ENV: production
-      DATABASE_URL: postgresql://${POSTGRES_USER:-bitsol}:${POSTGRES_PASSWORD:-bitsol_password}@db:5432/${POSTGRES_DB:-bitsol_assistant}?schema=public
+      DATABASE_URL: postgresql://${POSTGRES_USER:-aone_user}:${POSTGRES_PASSWORD:-aone_secure_password}@db:5432/${POSTGRES_DB:-aone_restaurant}?schema=public
       REDIS_URL: redis://redis:6379
+      OWNER_EMAIL: ${OWNER_EMAIL:-owner@aonefoods.com}
     env_file:
       - .env
     ports:
       - "3000:3000"
 
 volumes:
-  bitsol_pgdata:
-  bitsol_redisdata:
+  aone_pgdata:
+  aone_redisdata:

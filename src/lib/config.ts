@@ -1,9 +1,7 @@
 /**
- * Server-side runtime configuration. Reads and validates environment variables
- * once, and exposes a typed `config` object to the rest of the app.
+ * Server-side runtime configuration for A-ONE Restaurant.
  *
  * Import this only from server code (route handlers, server components, lib).
- * Anything the browser needs must go through `NEXT_PUBLIC_*` or a prop.
  */
 import { z } from "zod";
 
@@ -15,15 +13,6 @@ const bool = (def: boolean) =>
 
 const optional = z.string().optional();
 
-/**
- * Normalise NODE_ENV instead of rejecting it.
- *
- * Managed hosts do not always set a value Next.js considers standard — some
- * shared platforms use "prod", "staging" or leave it blank. Throwing on those
- * takes the whole site down for a label mismatch, so anything unrecognised is
- * treated as production: the safe assumption for a deployed app, since it is
- * the stricter of the two modes (secure cookies, no dev affordances).
- */
 const nodeEnv = z.preprocess((value) => {
   const raw = String(value ?? "").trim().toLowerCase();
   if (!raw) return "development";
@@ -34,176 +23,93 @@ const nodeEnv = z.preprocess((value) => {
 
 const schema = z.object({
   NODE_ENV: nodeEnv.default("development"),
-  APP_NAME: z.string().default("BITSOL AI Assistant"),
+  APP_NAME: z.string().default("A-ONE Restaurant"),
   APP_URL: z.string().default("http://localhost:3000"),
 
   DATABASE_URL: optional,
-  REDIS_URL: optional,
+  DIRECT_DATABASE_URL: optional,
 
-  JWT_SECRET: z.string().default("dev-insecure-secret-change-me"),
+  OWNER_EMAIL: optional,
+
+  JWT_SECRET: z.string().default("aone-restaurant-secure-jwt-key-2025"),
   JWT_EXPIRES_IN: z.string().default("7d"),
-  BCRYPT_ROUNDS: z.coerce.number().int().min(8).max(15).default(12),
+  BCRYPT_ROUNDS: z.coerce.number().int().min(8).max(15).default(10),
 
-  AI_PROVIDER: z.enum(["claude", "openai", "ollama", "gemini"]).default("claude"),
-  AI_MODEL: z.string().default("claude-opus-4-8"),
-  AI_MAX_TOKENS: z.coerce.number().int().positive().default(1400),
-  AI_THINKING: bool(false),
-
+  AI_PROVIDER: z.enum(["anthropic", "openai", "gemini", "claude", "openrouter"]).default("anthropic"),
+  AI_MODEL: z.string().default("claude-3-5-sonnet-20241022"),
+  AI_MAX_TOKENS: z.coerce.number().int().positive().default(800),
+  AI_API_KEY: optional,
   ANTHROPIC_API_KEY: optional,
+  OPENROUTER_API_KEY: optional,
   OPENAI_API_KEY: optional,
-  OPENAI_BASE_URL: z.string().default("https://api.openai.com/v1"),
   GEMINI_API_KEY: optional,
 
-  // --- Notification & integration channels ---------------------------------
-  SMTP_HOST: optional,
-  SMTP_PORT: z.coerce.number().int().positive().default(587),
-  SMTP_USER: optional,
-  SMTP_PASSWORD: optional,
-  SMTP_FROM: z.string().default("BITSOL <no-reply@bitsolmarketing.com>"),
-
-  SMS_API_KEY: optional,
-  SMS_SENDER_ID: z.string().default("BITSOL"),
-
-  // --- WhatsApp Business Cloud API (Meta) ----------------------------------
-  /** Phone number ID of the business number (Meta → WhatsApp → API Setup). */
-  WHATSAPP_PHONE_ID: optional,
-  /** Permanent system-user access token with `whatsapp_business_messaging`. */
+  // WhatsApp Cloud API
   WHATSAPP_TOKEN: optional,
-  /** Shared secret typed into Meta's webhook form; echoed back on GET verify. */
-  WHATSAPP_VERIFY_TOKEN: optional,
-  /** Meta app secret, used to verify the `X-Hub-Signature-256` on every POST. */
-  WHATSAPP_APP_SECRET: optional,
-  /**
-   * WhatsApp Business Account ID — a different id from the phone number ID.
-   * Message templates belong to the account, not the number, so every template
-   * call (list, create, delete) is addressed to this and nothing else.
-   */
+  WHATSAPP_ACCESS_TOKEN: optional,
+  WHATSAPP_PHONE_ID: optional,
+  WHATSAPP_PHONE_NUMBER_ID: optional,
   WHATSAPP_WABA_ID: optional,
+  WHATSAPP_BUSINESS_ACCOUNT_ID: optional,
+  WHATSAPP_VERIFY_TOKEN: optional,
+  WHATSAPP_APP_SECRET: optional,
   WHATSAPP_API_VERSION: z.string().default("v21.0"),
-  /** Set false to keep the number connected but stop the bot from replying. */
   WHATSAPP_AUTO_REPLY: bool(true),
 
-  GOOGLE_MAPS_API_KEY: optional,
-
-  // --- Team routing --------------------------------------------------------
-  /** Inbox that receives new BITSOL Marketing leads, quotes and meetings. */
-  SALES_NOTIFY_EMAIL: optional,
-  /** Inbox that receives new BITSOL Institute admission inquiries. */
-  ADMISSIONS_NOTIFY_EMAIL: optional,
+  // Restaurant alerts
+  ORDER_NOTIFY_EMAIL: optional,
+  ORDER_NOTIFY_PHONE: optional,
 });
 
 const parsed = schema.safeParse(process.env);
 
-/**
- * `next build` imports every route module to collect its metadata, so anything
- * this file throws happens *during the build* — and Next reports it by falling
- * back to the pages-router error document, i.e. the notoriously misleading
- * "<Html> should not be imported outside of pages/_document" while prerendering
- * /404. The real cause (one bad environment variable) never appears in the log.
- *
- * A build must not depend on runtime configuration being present or correct:
- * on shared hosting the panel's variables are frequently applied to the running
- * app but not to the build shell. So during a build we log loudly and fall back
- * to the schema defaults; at runtime, where a misconfiguration is a genuine
- * problem, we still refuse to start.
- */
-const isBuildPhase =
-  process.env.NEXT_PHASE === "phase-production-build" ||
-  process.env.NEXT_PHASE === "phase-development-server";
-
 if (!parsed.success) {
-  const issues = parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`);
-  console.error("Invalid environment configuration:", issues);
-
-  if (!isBuildPhase) {
-    throw new Error("Invalid environment configuration. See logs above.");
-  }
   console.warn(
-    "[config] Continuing the build with default values. Fix these variables " +
-      "before the app is started, or it will refuse to boot."
+    "[A-ONE Config] Warning: Invalid or missing environment variables:",
+    parsed.error.format()
   );
 }
 
-// Re-parse against an empty object so the defaults apply, rather than carrying
-// the invalid values forward. Only reached during a build.
-const env = parsed.success ? parsed.data : schema.parse({ NODE_ENV: "production" });
+const env = parsed.success ? parsed.data : schema.parse({});
 
 export const config = {
   env: env.NODE_ENV,
+  isDev: env.NODE_ENV === "development",
   isProd: env.NODE_ENV === "production",
-  appName: env.APP_NAME,
-  appUrl: env.APP_URL,
-
-  databaseUrl: env.DATABASE_URL,
-  redisUrl: env.REDIS_URL,
-
+  app: {
+    name: env.APP_NAME,
+    url: env.APP_URL,
+    ownerEmail: (env.OWNER_EMAIL && env.OWNER_EMAIL.trim()) ? env.OWNER_EMAIL.trim().toLowerCase() : "",
+  },
+  db: {
+    url: env.DATABASE_URL,
+  },
   jwt: {
     secret: env.JWT_SECRET,
     expiresIn: env.JWT_EXPIRES_IN,
   },
   bcryptRounds: env.BCRYPT_ROUNDS,
-
   ai: {
     provider: env.AI_PROVIDER,
     model: env.AI_MODEL,
     maxTokens: env.AI_MAX_TOKENS,
-    thinking: env.AI_THINKING,
-    anthropicApiKey: env.ANTHROPIC_API_KEY,
-    openaiApiKey: env.OPENAI_API_KEY,
-    openaiBaseUrl: env.OPENAI_BASE_URL,
-    geminiApiKey: env.GEMINI_API_KEY,
+    apiKey: env.AI_API_KEY || env.ANTHROPIC_API_KEY || env.OPENROUTER_API_KEY || env.OPENAI_API_KEY || env.GEMINI_API_KEY,
+    anthropicKey: env.ANTHROPIC_API_KEY || env.AI_API_KEY,
+    openrouterKey: env.OPENROUTER_API_KEY || env.AI_API_KEY,
+    openaiKey: env.OPENAI_API_KEY,
+    geminiKey: env.GEMINI_API_KEY,
   },
-
-  mail: {
-    host: env.SMTP_HOST,
-    port: env.SMTP_PORT,
-    user: env.SMTP_USER,
-    password: env.SMTP_PASSWORD,
-    from: env.SMTP_FROM,
-    enabled: Boolean(env.SMTP_HOST && env.SMTP_USER),
-  },
-
-  sms: {
-    apiKey: env.SMS_API_KEY,
-    senderId: env.SMS_SENDER_ID,
-    enabled: Boolean(env.SMS_API_KEY),
-  },
-
   whatsapp: {
-    phoneId: env.WHATSAPP_PHONE_ID,
-    token: env.WHATSAPP_TOKEN,
+    token: env.WHATSAPP_TOKEN || env.WHATSAPP_ACCESS_TOKEN,
+    phoneId: env.WHATSAPP_PHONE_ID || env.WHATSAPP_PHONE_NUMBER_ID,
+    wabaId: env.WHATSAPP_WABA_ID || env.WHATSAPP_BUSINESS_ACCOUNT_ID,
     verifyToken: env.WHATSAPP_VERIFY_TOKEN,
     appSecret: env.WHATSAPP_APP_SECRET,
-    wabaId: env.WHATSAPP_WABA_ID,
     apiVersion: env.WHATSAPP_API_VERSION,
     autoReply: env.WHATSAPP_AUTO_REPLY,
-    /** Outbound sending is possible (templates, broadcasts, bot replies). */
-    enabled: Boolean(env.WHATSAPP_PHONE_ID && env.WHATSAPP_TOKEN),
-    /**
-     * Templates can be listed, created and synced. Separate from `enabled`
-     * because the two need different things: sending needs the phone number
-     * ID, managing templates needs the business account ID and a token
-     * carrying `whatsapp_business_management`.
-     */
-    templatesEnabled: Boolean(env.WHATSAPP_WABA_ID && env.WHATSAPP_TOKEN),
-    /** Meta can reach the webhook: verification and signature checks are set. */
-    webhookReady: Boolean(env.WHATSAPP_VERIFY_TOKEN && env.WHATSAPP_APP_SECRET),
-    /**
-     * The callback URL registered with Meta. `/webhook` is rewritten to
-     * `/api/whatsapp/webhook` in next.config.mjs — this is the short public
-     * form, and the single value the admin console tells you to paste.
-     */
-    webhookUrl: `${env.APP_URL.replace(/\/$/, "")}/webhook`,
   },
-
-  maps: {
-    apiKey: env.GOOGLE_MAPS_API_KEY,
+  orders: {
+    notifyEmail: env.ORDER_NOTIFY_EMAIL,
+    notifyPhone: env.ORDER_NOTIFY_PHONE,
   },
-
-  routing: {
-    salesEmail: env.SALES_NOTIFY_EMAIL,
-    admissionsEmail: env.ADMISSIONS_NOTIFY_EMAIL,
-  },
-} as const;
-
-export type AppConfig = typeof config;
+};

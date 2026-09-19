@@ -2,16 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Bot, Sparkles } from "lucide-react";
+import { UtensilsCrossed, Sparkles } from "lucide-react";
 import { BRANDING, brandName } from "@/lib/branding";
-import { BRANDS } from "@/lib/brands";
 
 /**
- * Branded splash overlay shown briefly on first load, then fades to reveal the
- * page. Shows the BITSOL umbrella identity and both businesses, since the
- * visitor has not yet chosen between them.
+ * Branded splash overlay for A-ONE Restaurant.
  */
-export function SplashScreen({ duration = 2000 }: { duration?: number }) {
+export function SplashScreen({ duration = 1200 }: { duration?: number }) {
   const [visible, setVisible] = useState(true);
 
   useEffect(() => {
@@ -25,8 +22,8 @@ export function SplashScreen({ duration = 2000 }: { duration?: number }) {
         <motion.div
           initial={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          transition={{ duration: 0.6 }}
-          className="brand-gradient fixed inset-0 z-[100] flex flex-col items-center justify-center text-white"
+          transition={{ duration: 0.5 }}
+          className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-neutral-950 text-white"
         >
           <motion.div
             initial={{ scale: 0.85, opacity: 0 }}
@@ -35,20 +32,21 @@ export function SplashScreen({ duration = 2000 }: { duration?: number }) {
             className="flex flex-col items-center gap-5"
           >
             <div className="relative">
-              <span className="absolute inset-0 animate-ping rounded-full bg-white/20" />
-              <div className="relative grid size-20 place-items-center rounded-2xl bg-white/10 ring-1 ring-white/30 backdrop-blur-md">
-                <Bot className="size-10" />
+              <div className="relative grid h-24 w-52 place-items-center rounded-2xl bg-neutral-900 border border-neutral-800/90 p-2 shadow-2xl shadow-amber-500/10 overflow-hidden">
+                <img
+                  src="/assets/images/logo-3d.png"
+                  alt="A-ONE Restaurant"
+                  className="w-full h-full object-contain rounded-xl"
+                />
               </div>
             </div>
 
             <div className="text-center">
-              <h1 className="text-2xl font-bold tracking-tight">
-                {BRANDING.product.name}
+              <h1 className="text-2xl font-black tracking-tight text-white">
+                A-ONE RESTAURANT
               </h1>
-              <p className="mt-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-sm text-white/80">
-                <span>{BRANDS.MARKETING.emoji} {BRANDS.MARKETING.shortName}</span>
-                <span className="text-white/40" aria-hidden>·</span>
-                <span>{BRANDS.INSTITUTE.emoji} {BRANDS.INSTITUTE.shortName}</span>
+              <p className="mt-1 text-sm text-neutral-400">
+                Taste of Purity, Tradition of Quality
               </p>
             </div>
           </motion.div>
@@ -56,16 +54,10 @@ export function SplashScreen({ duration = 2000 }: { duration?: number }) {
           <motion.div
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.4 }}
-            className="absolute bottom-10 flex flex-col items-center gap-1 text-xs text-white/70"
+            transition={{ delay: 0.3 }}
+            className="absolute bottom-10 flex flex-col items-center gap-1 text-xs text-neutral-500"
           >
-            <span className="inline-flex items-center gap-1.5">
-              <Sparkles className="size-3.5" /> {BRANDING.product.poweredBy}
-            </span>
-            <span>
-              Designed &amp; Developed by{" "}
-              <span className="font-semibold text-white">{brandName}</span>
-            </span>
+            <span>Official Operations Portal</span>
           </motion.div>
         </motion.div>
       )}

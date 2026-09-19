@@ -59,11 +59,12 @@ if (existsSync(nextDir)) {
 }
 
 // --- Build -------------------------------------------------------------------
-const result = spawnSync("next", ["build"], {
+const cmd = process.platform === "win32" ? "npx" : "next";
+const args = process.platform === "win32" ? ["next", "build"] : ["build"];
+const result = spawnSync(cmd, args, {
   cwd: root,
   stdio: "inherit",
   env: process.env,
-  // Resolves `next` from node_modules/.bin on both Windows (.cmd) and Linux.
   shell: true,
 });
 

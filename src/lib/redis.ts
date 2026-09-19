@@ -1,16 +1,15 @@
 import Redis from "ioredis";
-import { config } from "./config";
 
 /**
- * Optional Redis client (rate-limiting, caching, session helpers).
- * Returns `null` when REDIS_URL is not configured so the app still runs
- * without Redis in local development.
+ * Optional Redis client (rate-limiting, caching).
+ * Returns `null` when REDIS_URL is not configured.
  */
 const globalForRedis = globalThis as unknown as { redis: Redis | null | undefined };
 
 function createClient(): Redis | null {
-  if (!config.redisUrl) return null;
-  const client = new Redis(config.redisUrl, {
+  const redisUrl = process.env.REDIS_URL;
+  if (!redisUrl) return null;
+  const client = new Redis(redisUrl, {
     lazyConnect: true,
     maxRetriesPerRequest: 2,
   });
@@ -25,8 +24,7 @@ if (process.env.NODE_ENV !== "production") {
 }
 
 /**
- * Fixed-window rate limiter. No-ops (always allows) when Redis is unavailable
- * so local development is frictionless. Returns whether the action is allowed.
+ * Fixed-window rate limiter. Returns whether the action is allowed.
  */
 export async function rateLimit(
   key: string,
@@ -41,7 +39,6 @@ export async function rateLimit(
     if (count === 1) await redis.expire(bucket, windowSeconds);
     return { allowed: count <= limit, remaining: Math.max(0, limit - count) };
   } catch {
-    // Fail open — availability over strictness for a public helpline.
     return { allowed: true, remaining: limit };
   }
 }

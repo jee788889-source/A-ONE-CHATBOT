@@ -1,16 +1,12 @@
-import { Metadata } from "next";
-import { ChatWindow } from "@/components/chat/ChatWindow";
+import { getSession } from "@/lib/session";
+import { canAccessAdmin } from "@/lib/auth";
+import { AOneWelcomeHero } from "@/components/welcome/AOneWelcomeHero";
 
-export const metadata: Metadata = {
-  title: "A-ONE Foods | AI Customer Assistant",
-  description:
-    "Discover A-ONE Foods products, get product information, and connect with the A-ONE Foods team through our AI assistant.",
-};
+export const dynamic = "force-dynamic";
 
-export default function HomePage() {
-  return (
-    <main className="flex h-dvh w-screen flex-col overflow-hidden bg-background">
-      <ChatWindow />
-    </main>
-  );
+export default async function HomePage() {
+  const session = await getSession();
+  const isAuthenticated = canAccessAdmin(session);
+
+  return <AOneWelcomeHero isAuthenticated={isAuthenticated} />;
 }

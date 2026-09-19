@@ -1,707 +1,548 @@
-/**
- * =============================================================================
- *  Database seed — BITSOL AI Assistant
- *  Designed & Developed by BITSOL MARKETING
- * =============================================================================
- *
- *  Populates a production-ready starting state:
- *
- *    • RBAC — permissions, roles and role/permission grants
- *    • Users — super admin plus one scoped staff account per business
- *    • BITSOL Marketing — services, portfolio, reviews
- *    • BITSOL Institute — faculty, courses, upcoming batches
- *    • Both knowledge bases (kept in physically separate tables)
- *    • Settings, WhatsApp templates, announcements and events
- *
- *  Idempotent: every write is an upsert or an existence check, so it is safe to
- *  re-run after editing the catalogues in `src/data`.
- *
- *  Run with:  npm run db:seed
- * =============================================================================
- */
-import { PrismaClient, type Department, type Prisma } from "@prisma/client";
+// =============================================================================
+//  A-ONE Restaurant — Database Seed Script
+//  Copyright (c) A-ONE Restaurant. All rights reserved.
+// =============================================================================
+
+import { readFileSync, existsSync } from "node:fs";
+import { resolve } from "node:path";
+import { PrismaClient, Role, UserStatus, OrderStatus, OrderType, PaymentStatus, Channel, MessageRole } from "@prisma/client";
 import bcrypt from "bcryptjs";
 
-import { MARKETING_SERVICES } from "../src/data/marketing/services";
-import { MARKETING_KNOWLEDGE_BASE } from "../src/data/marketing/knowledge-base";
-import { INSTITUTE_COURSES } from "../src/data/institute/courses";
-import { INSTITUTE_KNOWLEDGE_BASE } from "../src/data/institute/knowledge-base";
+// Load .env.local if present
+for (const envFile of [".env.local", ".env"]) {
+  const envPath = resolve(process.cwd(), envFile);
+  if (existsSync(envPath)) {
+    const lines = readFileSync(envPath, "utf-8").split("\n");
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const idx = trimmed.indexOf("=");
+      if (idx !== -1) {
+        const key = trimmed.slice(0, idx).trim();
+        let val = trimmed.slice(idx + 1).trim();
+        if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+          val = val.slice(1, -1);
+        }
+        if (!process.env[key]) {
+          process.env[key] = val;
+        }
+      }
+    }
+  }
+}
 
 const prisma = new PrismaClient();
 
-const rounds = Number(process.env.BCRYPT_ROUNDS ?? 12);
-
 async function main() {
-  console.log("🌱  Seeding the BITSOL AI Assistant database…\n");
+  console.log("🌱 Starting A-ONE Restaurant database seeding...");
 
-  await seedPermissionsAndRoles();
-  await seedUsers();
-  await seedMarketing();
-  await seedInstitute();
-  await seedKnowledgeBases();
-  await seedSettings();
-  await seedContent();
+  // 1. Clean existing tables if needed
+  await prisma.notification.deleteMany().catch(() => {});
+  await prisma.auditLog.deleteMany().catch(() => {});
+  await prisma.orderItem.deleteMany().catch(() => {});
+  await prisma.order.deleteMany().catch(() => {});
+  await prisma.message.deleteMany().catch(() => {});
+  await prisma.conversation.deleteMany().catch(() => {});
+  await prisma.customer.deleteMany().catch(() => {});
+  await prisma.menuItem.deleteMany().catch(() => {});
+  await prisma.menuCategory.deleteMany().catch(() => {});
+  await prisma.restaurantSettings.deleteMany().catch(() => {});
+  await prisma.user.deleteMany().catch(() => {});
 
-  console.log("\n✅  Seed complete.");
-}
+  // 2. Hash passwords
+  const adminPassword = await bcrypt.hash("admin", 10);
 
-// ------------------------------------------------------------------- RBAC ---
+  const ownerEmail = process.env.OWNER_EMAIL || "owner@aonefoods.com";
 
-const PERMISSIONS: Array<{ key: string; group: string; description: string }> = [
-  { key: "dashboard.view", group: "Dashboard", description: "View the admin dashboard" },
-  { key: "conversations.view", group: "Conversations", description: "View live and past conversations" },
-  { key: "conversations.takeover", group: "Conversations", description: "Take over a conversation from the assistant" },
-  { key: "crm.leads.view", group: "CRM", description: "View marketing leads" },
-  { key: "crm.leads.manage", group: "CRM", description: "Create, edit and move marketing leads" },
-  { key: "crm.admissions.view", group: "CRM", description: "View admission inquiries" },
-  { key: "crm.admissions.manage", group: "CRM", description: "Create, edit and move admission inquiries" },
-  { key: "customers.manage", group: "CRM", description: "Manage customers" },
-  { key: "students.manage", group: "Academics", description: "Manage students and enrollments" },
-  { key: "courses.manage", group: "Academics", description: "Manage courses, batches and faculty" },
-  { key: "attendance.manage", group: "Academics", description: "Mark and edit attendance" },
-  { key: "certificates.issue", group: "Academics", description: "Issue certificates" },
-  { key: "services.manage", group: "Catalogue", description: "Manage marketing services" },
-  { key: "portfolio.manage", group: "Catalogue", description: "Manage portfolio and reviews" },
-  { key: "knowledge.view", group: "Knowledge Base", description: "View knowledge base content" },
-  { key: "knowledge.manage", group: "Knowledge Base", description: "Create and edit knowledge base content" },
-  { key: "knowledge.publish", group: "Knowledge Base", description: "Publish and re-index knowledge base content" },
-  { key: "tickets.view", group: "Support", description: "View support tickets" },
-  { key: "tickets.manage", group: "Support", description: "Assign and resolve support tickets" },
-  { key: "meetings.manage", group: "Support", description: "Confirm and reschedule meetings" },
-  { key: "quotes.manage", group: "Sales", description: "Create and send quotations" },
-  { key: "broadcasts.send", group: "Messaging", description: "Send WhatsApp and email broadcasts" },
-  { key: "reports.view", group: "Reports", description: "View reports and analytics" },
-  { key: "users.manage", group: "Administration", description: "Manage users, roles and permissions" },
-  { key: "settings.manage", group: "Administration", description: "Manage settings and integrations" },
-  { key: "logs.view", group: "Administration", description: "View system logs" },
-];
+  // 3. Seed Users (RBAC: Owner, Manager, Staff)
+  const owner = await prisma.user.create({
+    data: {
+      email: ownerEmail,
+      name: "A-ONE Owner",
+      passwordHash: adminPassword,
+      role: Role.OWNER,
+      status: UserStatus.ACTIVE,
+      phone: "+92 300 1112233",
+      permissions: [
+        "all",
+        "manage_staff",
+        "manage_menu",
+        "manage_orders",
+        "view_financials",
+        "manage_settings",
+        "manage_whatsapp",
+        "view_audit_logs",
+      ],
+    },
+  });
 
-const ROLES: Array<{
-  key: string;
-  name: string;
-  description: string;
-  department: Department | null;
-  permissions: string[] | "ALL";
-}> = [
-  {
-    key: "super-admin",
-    name: "Super Admin",
-    description: "Unrestricted access across both businesses.",
-    department: null,
-    permissions: "ALL",
-  },
-  {
-    key: "marketing-admin",
-    name: "Marketing Admin",
-    description: "Full access to BITSOL Marketing modules.",
-    department: "MARKETING",
-    permissions: [
-      "dashboard.view", "conversations.view", "conversations.takeover",
-      "crm.leads.view", "crm.leads.manage", "customers.manage",
-      "services.manage", "portfolio.manage", "knowledge.view", "knowledge.manage",
-      "knowledge.publish", "tickets.view", "tickets.manage", "meetings.manage",
-      "quotes.manage", "broadcasts.send", "reports.view",
+  const manager = await prisma.user.create({
+    data: {
+      email: "manager@aonefoods.com",
+      name: "Tariq Mahmood (Manager)",
+      passwordHash: adminPassword,
+      role: Role.MANAGER,
+      status: UserStatus.ACTIVE,
+      phone: "+92 300 4445566",
+      permissions: [
+        "view_conversations",
+        "reply_conversations",
+        "view_orders",
+        "update_orders",
+        "manage_menu",
+        "view_customers",
+      ],
+    },
+  });
+
+  const staff = await prisma.user.create({
+    data: {
+      email: "staff@aonefoods.com",
+      name: "Bilal Ahmed (Order Staff)",
+      passwordHash: adminPassword,
+      role: Role.STAFF,
+      status: UserStatus.ACTIVE,
+      phone: "+92 300 7778899",
+      permissions: [
+        "view_conversations",
+        "reply_conversations",
+        "view_orders",
+        "update_assigned_orders",
+      ],
+    },
+  });
+
+  console.log(`✅ Created Users: Owner (${owner.email}), Manager (${manager.email}), Staff (${staff.email})`);
+
+  // 4. Seed Restaurant Settings
+  await prisma.restaurantSettings.create({
+    data: {
+      id: "default",
+      name: "A-ONE Restaurant",
+      tagline: "Authentic Taste, Premium Quality & Traditional Savories",
+      phone: "+92 300 1234567",
+      email: "contact@aonefoods.com",
+      address: "A-ONE Restaurant & Foods, Main Boulevard, Commercial Area, Lahore, Pakistan",
+      currency: "PKR",
+      currencySymbol: "Rs.",
+      deliveryFee: 150,
+      minOrderAmount: 500,
+      isAcceptingOrders: true,
+      openingHours: {
+        monday: { open: "11:00", close: "01:00", isOpen: true },
+        tuesday: { open: "11:00", close: "01:00", isOpen: true },
+        wednesday: { open: "11:00", close: "01:00", isOpen: true },
+        thursday: { open: "11:00", close: "01:00", isOpen: true },
+        friday: { open: "14:00", close: "02:00", isOpen: true },
+        saturday: { open: "11:00", close: "02:00", isOpen: true },
+        sunday: { open: "11:00", close: "01:00", isOpen: true },
+      },
+      deliverySettings: {
+        standardDeliveryFee: 150,
+        freeDeliveryThreshold: 2500,
+        estimatedMinutes: 35,
+        allowedAreas: [
+          "Gulberg",
+          "Model Town",
+          "DHA Phase 1-6",
+          "Faisal Town",
+          "Johar Town",
+          "Garden Town",
+          "Cantt",
+        ],
+      },
+      whatsappConfig: {
+        welcomeMessage:
+          "Welcome to A-ONE Restaurant! 🍔🍕🍛\nHow may we serve you today?\n\nSend *Menu* to browse our delicious dishes or *Order* to place an order.",
+        autoReplyEnabled: true,
+        fallbackMessage:
+          "Thank you for contacting A-ONE Restaurant. One of our team members will assist you right away.",
+      },
+      aiSettings: {
+        provider: "anthropic",
+        model: "claude-3-5-sonnet-20241022",
+        temperature: 0.2,
+        maxTokens: 600,
+        strictGuardrails: true,
+      },
+    },
+  });
+
+  console.log("✅ Seeded Restaurant Settings");
+
+  // 5. Seed Menu Categories & Items
+  const catBurgers = await prisma.menuCategory.create({
+    data: {
+      name: "Burgers & Sandwiches",
+      urduName: "برگر اور سینڈوچ",
+      description: "Signature handcrafted burgers, zesty crunch & juicy patties",
+      displayOrder: 1,
+      isActive: true,
+    },
+  });
+
+  const catRice = await prisma.menuCategory.create({
+    data: {
+      name: "Rice & Biryani",
+      urduName: "بریانی اور چاول",
+      description: "Aromatic basmati rice cooked with authentic spices and tender meat",
+      displayOrder: 2,
+      isActive: true,
+    },
+  });
+
+  const catBBQ = await prisma.menuCategory.create({
+    data: {
+      name: "BBQ & Grills",
+      urduName: "باربی کیو اور تکہ",
+      description: "Charcoal-grilled succulent chicken and beef specialties",
+      displayOrder: 3,
+      isActive: true,
+    },
+  });
+
+  const catPizza = await prisma.menuCategory.create({
+    data: {
+      name: "Pizza & Pastas",
+      urduName: "پیزا اور پاستا",
+      description: "Crispy crust pizzas loaded with cheese and savory toppings",
+      displayOrder: 4,
+      isActive: true,
+    },
+  });
+
+  const catSavories = await prisma.menuCategory.create({
+    data: {
+      name: "Traditional Savories & Nimko",
+      urduName: "روایتی نمکو اور اسنیکس",
+      description: "Famous authentic A-ONE crunchy savories and tea-time snacks",
+      displayOrder: 5,
+      isActive: true,
+    },
+  });
+
+  const catDrinks = await prisma.menuCategory.create({
+    data: {
+      name: "Beverages & Desserts",
+      urduName: "مشروبات اور میٹھے",
+      description: "Chilled refreshers, traditional desserts, and soft drinks",
+      displayOrder: 6,
+      isActive: true,
+    },
+  });
+
+  // Menu Items
+  await prisma.menuItem.createMany({
+    data: [
+      // Burgers
+      {
+        categoryId: catBurgers.id,
+        name: "A-ONE Special Beef Smash Burger",
+        urduName: "اے ون اسپیشل بیف برگر",
+        description: "Double beef patty, melted cheddar, caramelized onions, secret house sauce",
+        price: 850,
+        isAvailable: true,
+        isFeatured: true,
+        displayOrder: 1,
+        preparationTime: 15,
+      },
+      {
+        categoryId: catBurgers.id,
+        name: "Crispy Zinger Crunch Burger",
+        urduName: "کرسپی زنگر برگر",
+        description: "Golden fried crispy chicken breast fillet, spicy mayo, iceberg lettuce",
+        price: 650,
+        isAvailable: true,
+        isFeatured: true,
+        displayOrder: 2,
+        preparationTime: 12,
+      },
+      {
+        categoryId: catBurgers.id,
+        name: "Grilled Chicken Club Sandwich",
+        urduName: "چکن کلب سینڈوچ",
+        description: "Triple-layer toasted bread with grilled chicken, egg, cheese & coleslaw with fries",
+        price: 580,
+        isAvailable: true,
+        isFeatured: false,
+        displayOrder: 3,
+        preparationTime: 12,
+      },
+
+      // Rice
+      {
+        categoryId: catRice.id,
+        name: "A-ONE Special Chicken Dum Biryani",
+        urduName: "اے ون اسپیشل چکن دم بریانی",
+        description: "Fragrant long-grain basmati rice layered with spiced chicken, potatoes & saffron aroma",
+        price: 520,
+        isAvailable: true,
+        isFeatured: true,
+        displayOrder: 1,
+        preparationTime: 10,
+      },
+      {
+        categoryId: catRice.id,
+        name: "Mutton Yakhni Pulao",
+        urduName: "مٹن یخنی پلاؤ",
+        description: "Slow-cooked tender mutton infused with rich broth and whole spices",
+        price: 950,
+        isAvailable: true,
+        isFeatured: true,
+        displayOrder: 2,
+        preparationTime: 15,
+      },
+
+      // BBQ
+      {
+        categoryId: catBBQ.id,
+        name: "Chicken Malai Boti (8 Pcs)",
+        urduName: "چکن ملائی بوٹی",
+        description: "Melt-in-mouth boneless chicken chunks marinated in cream, green chilies & mild spices",
+        price: 780,
+        isAvailable: true,
+        isFeatured: true,
+        displayOrder: 1,
+        preparationTime: 20,
+      },
+      {
+        categoryId: catBBQ.id,
+        name: "Beef Seekh Kabab Platter (4 Pcs)",
+        urduName: "بیف سیخ کباب پلیٹر",
+        description: "Charcoal-grilled minced beef kababs served with mint raita, salad & fresh naan",
+        price: 720,
+        isAvailable: true,
+        isFeatured: false,
+        displayOrder: 2,
+        preparationTime: 18,
+      },
+
+      // Pizza
+      {
+        categoryId: catPizza.id,
+        name: "A-ONE Supreme Pizza (Large 13\")",
+        urduName: "اے ون سپریم پیزا",
+        description: "Smoked chicken, pepperoni, mushrooms, black olives, bell peppers & extra mozzarella",
+        price: 1650,
+        isAvailable: true,
+        isFeatured: true,
+        displayOrder: 1,
+        preparationTime: 25,
+      },
+      {
+        categoryId: catPizza.id,
+        name: "Creamy Alfredo Fettuccine Pasta",
+        urduName: "الفریڈو پاستا",
+        description: "Fettuccine pasta in rich parmesan cream sauce with grilled herb chicken & garlic bread",
+        price: 790,
+        isAvailable: true,
+        isFeatured: false,
+        displayOrder: 2,
+        preparationTime: 18,
+      },
+
+      // Savories & Nimko
+      {
+        categoryId: catSavories.id,
+        name: "A-ONE Special Mix Nimko (400g)",
+        urduName: "اے ون اسپیشل مکس نمکو",
+        description: "Crispy savory blend of spiced grams, sev, roasted nuts, and traditional crunch",
+        price: 380,
+        isAvailable: true,
+        isFeatured: true,
+        displayOrder: 1,
+        preparationTime: 5,
+      },
+      {
+        categoryId: catSavories.id,
+        name: "Spicy Daal Moth (400g)",
+        urduName: "دال موٹھ",
+        description: "Crunchy fried moth lentils tossed in tangy chaat masala",
+        price: 360,
+        isAvailable: true,
+        isFeatured: false,
+        displayOrder: 2,
+        preparationTime: 5,
+      },
+
+      // Drinks & Desserts
+      {
+        categoryId: catDrinks.id,
+        name: "Fresh Mint Lemonade",
+        urduName: "تازہ منٹ لیمونیڈ",
+        description: "Refreshing crushed ice drink with fresh garden mint, lemon and black salt",
+        price: 240,
+        isAvailable: true,
+        isFeatured: true,
+        displayOrder: 1,
+        preparationTime: 5,
+      },
+      {
+        categoryId: catDrinks.id,
+        name: "Traditional Matka Kheer",
+        urduName: "مٹکا کھیر",
+        description: "Slow-cooked rice pudding in clay pot with cardamom, pistachios & silver vark",
+        price: 280,
+        isAvailable: true,
+        isFeatured: true,
+        displayOrder: 2,
+        preparationTime: 5,
+      },
     ],
-  },
-  {
-    key: "sales-agent",
-    name: "Sales Agent",
-    description: "Works the BITSOL Marketing lead pipeline.",
-    department: "MARKETING",
-    permissions: [
-      "dashboard.view", "conversations.view", "crm.leads.view", "crm.leads.manage",
-      "customers.manage", "meetings.manage", "quotes.manage", "tickets.view",
+  });
+
+  console.log("✅ Seeded Menu Categories & Items");
+
+  // 6. Seed Sample Customers, Conversations & Orders
+  const customer1 = await prisma.customer.create({
+    data: {
+      phone: "+923001234567",
+      name: "Ahmed Raza",
+      email: "ahmed.raza@example.com",
+      address: "House 45, Street 12, Phase 4, DHA, Lahore",
+      notes: "VIP Customer - loves extra spicy",
+      totalOrders: 3,
+      totalSpent: 4250,
+    },
+  });
+
+  const customer2 = await prisma.customer.create({
+    data: {
+      phone: "+923219876543",
+      name: "Ayesha Malik",
+      address: "Apartment 3B, Gulberg Heights, Lahore",
+      notes: "Prefers no onions",
+      totalOrders: 1,
+      totalSpent: 1800,
+    },
+  });
+
+  const conv1 = await prisma.conversation.create({
+    data: {
+      customerId: customer1.id,
+      channel: Channel.WHATSAPP,
+      status: "OPEN",
+      assignedStaffId: staff.id,
+      unreadCount: 0,
+      lastMessageAt: new Date(),
+    },
+  });
+
+  await prisma.message.createMany({
+    data: [
+      {
+        conversationId: conv1.id,
+        role: MessageRole.USER,
+        content: "Salam! What are today's special deals?",
+        status: "READ",
+      },
+      {
+        conversationId: conv1.id,
+        role: MessageRole.ASSISTANT,
+        content:
+          "Wa Alaykum Assalam! Today we recommend our *A-ONE Special Beef Smash Burger* (Rs. 850) and *A-ONE Special Chicken Dum Biryani* (Rs. 520). Would you like to place an order?",
+        status: "READ",
+      },
+      {
+        conversationId: conv1.id,
+        role: MessageRole.USER,
+        content: "Yes please, 1 Beef Smash Burger and 1 Fresh Mint Lemonade for delivery.",
+        status: "READ",
+      },
     ],
-  },
-  {
-    key: "institute-admin",
-    name: "Institute Admin",
-    description: "Full access to BITSOL Institute modules.",
-    department: "INSTITUTE",
-    permissions: [
-      "dashboard.view", "conversations.view", "conversations.takeover",
-      "crm.admissions.view", "crm.admissions.manage", "students.manage",
-      "courses.manage", "attendance.manage", "certificates.issue",
-      "knowledge.view", "knowledge.manage", "knowledge.publish",
-      "tickets.view", "tickets.manage", "meetings.manage", "broadcasts.send",
-      "reports.view",
+  });
+
+  // Seed Sample Orders
+  const order1 = await prisma.order.create({
+    data: {
+      orderNumber: "AONE-1001",
+      customerId: customer1.id,
+      conversationId: conv1.id,
+      status: OrderStatus.PREPARING,
+      orderType: OrderType.DELIVERY,
+      paymentStatus: PaymentStatus.CASH_ON_DELIVERY,
+      subtotal: 1090,
+      deliveryFee: 150,
+      discount: 0,
+      total: 1240,
+      customerName: "Ahmed Raza",
+      customerPhone: "+923001234567",
+      deliveryAddress: "House 45, Street 12, Phase 4, DHA, Lahore",
+      notes: "Extra napkins please",
+      assignedStaffId: staff.id,
+    },
+  });
+
+  await prisma.orderItem.createMany({
+    data: [
+      {
+        orderId: order1.id,
+        itemName: "A-ONE Special Beef Smash Burger",
+        unitPrice: 850,
+        quantity: 1,
+        subtotal: 850,
+      },
+      {
+        orderId: order1.id,
+        itemName: "Fresh Mint Lemonade",
+        unitPrice: 240,
+        quantity: 1,
+        subtotal: 240,
+      },
     ],
-  },
-  {
-    key: "admissions-officer",
-    name: "Admissions Officer",
-    description: "Works the BITSOL Institute admissions pipeline.",
-    department: "INSTITUTE",
-    permissions: [
-      "dashboard.view", "conversations.view", "crm.admissions.view",
-      "crm.admissions.manage", "students.manage", "meetings.manage", "tickets.view",
+  });
+
+  const order2 = await prisma.order.create({
+    data: {
+      orderNumber: "AONE-1002",
+      customerId: customer2.id,
+      status: OrderStatus.NEW,
+      orderType: OrderType.DELIVERY,
+      paymentStatus: PaymentStatus.CASH_ON_DELIVERY,
+      subtotal: 1650,
+      deliveryFee: 150,
+      discount: 0,
+      total: 1800,
+      customerName: "Ayesha Malik",
+      customerPhone: "+923219876543",
+      deliveryAddress: "Apartment 3B, Gulberg Heights, Lahore",
+      notes: "Call upon arrival",
+      assignedStaffId: manager.id,
+    },
+  });
+
+  await prisma.orderItem.createMany({
+    data: [
+      {
+        orderId: order2.id,
+        itemName: "A-ONE Supreme Pizza (Large 13\")",
+        unitPrice: 1650,
+        quantity: 1,
+        subtotal: 1650,
+      },
     ],
-  },
-  {
-    key: "instructor",
-    name: "Instructor",
-    description: "Teaches batches; manages attendance and assignments.",
-    department: "INSTITUTE",
-    permissions: ["dashboard.view", "students.manage", "attendance.manage", "courses.manage"],
-  },
-];
+  });
 
-async function seedPermissionsAndRoles() {
-  for (const permission of PERMISSIONS) {
-    await prisma.permission.upsert({
-      where: { key: permission.key },
-      update: { group: permission.group, description: permission.description },
-      create: permission,
-    });
-  }
-  console.log(`   ✔ Permissions: ${PERMISSIONS.length}`);
-
-  const all = await prisma.permission.findMany({ select: { id: true, key: true } });
-  const byKey = new Map(all.map((p) => [p.key, p.id]));
-
-  for (const role of ROLES) {
-    const record = await prisma.role.upsert({
-      where: { key: role.key },
-      update: { name: role.name, description: role.description, department: role.department },
-      create: {
-        key: role.key,
-        name: role.name,
-        description: role.description,
-        department: role.department,
-        isSystem: true,
+  // 7. Initial Audit Log
+  await prisma.auditLog.create({
+    data: {
+      actorId: owner.id,
+      actorEmail: owner.email,
+      action: "SYSTEM_INITIALIZED",
+      target: "SYSTEM",
+      details: {
+        message: "A-ONE Restaurant management database seeded successfully.",
+        ownerEmail: owner.email,
       },
-    });
-
-    const keys = role.permissions === "ALL" ? PERMISSIONS.map((p) => p.key) : role.permissions;
-    // Replace grants wholesale so removing a permission from this file removes
-    // it from the database too — the seed is the source of truth for roles.
-    await prisma.rolePermission.deleteMany({ where: { roleId: record.id } });
-    await prisma.rolePermission.createMany({
-      data: keys
-        .map((key) => byKey.get(key))
-        .filter((id): id is string => Boolean(id))
-        .map((permissionId) => ({ roleId: record.id, permissionId })),
-      skipDuplicates: true,
-    });
-  }
-  console.log(`   ✔ Roles: ${ROLES.length}`);
-}
-
-// ------------------------------------------------------------------ Users ---
-
-async function seedUsers() {
-  const accounts = [
-    {
-      email: process.env.SEED_ADMIN_EMAIL ?? "admin@bitsol.local",
-      password: process.env.SEED_ADMIN_PASSWORD ?? "ChangeMe#2024",
-      name: "System Administrator",
-      role: "SUPER_ADMIN" as const,
-      department: null,
-      roleKey: "super-admin",
     },
-    {
-      email: "sales@bitsol.local",
-      password: process.env.SEED_STAFF_PASSWORD ?? "ChangeMe#2024",
-      name: "Marketing Sales Agent",
-      role: "AGENT" as const,
-      department: "MARKETING" as Department,
-      roleKey: "sales-agent",
-    },
-    {
-      email: "admissions@bitsol.local",
-      password: process.env.SEED_STAFF_PASSWORD ?? "ChangeMe#2024",
-      name: "Admissions Officer",
-      role: "AGENT" as const,
-      department: "INSTITUTE" as Department,
-      roleKey: "admissions-officer",
-    },
-  ];
+  });
 
-  for (const account of accounts) {
-    const rbac = await prisma.role.findUnique({ where: { key: account.roleKey } });
-    await prisma.user.upsert({
-      where: { email: account.email },
-      update: { role: account.role, department: account.department, roleId: rbac?.id },
-      create: {
-        name: account.name,
-        email: account.email,
-        passwordHash: await bcrypt.hash(account.password, rounds),
-        role: account.role,
-        department: account.department,
-        roleId: rbac?.id,
-      },
-    });
-  }
-  console.log(`   ✔ Users: ${accounts.length} (admin: ${accounts[0].email})`);
-}
-
-// -------------------------------------------------------------- Marketing ---
-
-async function seedMarketing() {
-  for (const [index, service] of MARKETING_SERVICES.entries()) {
-    await prisma.marketingService.upsert({
-      where: { slug: service.slug },
-      update: {
-        name: service.name,
-        group: service.group,
-        tagline: service.tagline,
-        overview: service.overview,
-        benefits: service.benefits,
-        features: service.features,
-        process: service.process,
-        priceFrom: service.pricing.startingAt,
-        priceModel: service.pricing.model,
-        priceNote: service.pricing.note,
-        sortOrder: index,
-      },
-      create: {
-        slug: service.slug,
-        name: service.name,
-        group: service.group,
-        tagline: service.tagline,
-        overview: service.overview,
-        benefits: service.benefits,
-        features: service.features,
-        process: service.process,
-        priceFrom: service.pricing.startingAt,
-        priceModel: service.pricing.model,
-        priceNote: service.pricing.note,
-        sortOrder: index,
-      },
-    });
-
-    // The catalogue's portfolio lines become browsable portfolio items so the
-    // admin console has real content to manage from day one.
-    for (const [i, item] of service.portfolio.entries()) {
-      const slug = `${service.slug}-case-${i + 1}`;
-      const record = await prisma.marketingService.findUnique({
-        where: { slug: service.slug },
-        select: { id: true },
-      });
-      await prisma.portfolioItem.upsert({
-        where: { slug },
-        update: { summary: item, serviceId: record?.id },
-        create: {
-          slug,
-          department: "MARKETING",
-          title: `${service.name} — case ${i + 1}`,
-          summary: item,
-          tags: [service.group],
-          serviceId: record?.id,
-          sortOrder: i,
-        },
-      });
-    }
-  }
-  console.log(`   ✔ Marketing services: ${MARKETING_SERVICES.length}`);
-
-  const reviews = [
-    {
-      department: "MARKETING" as Department,
-      author: "Operations Director",
-      role: "Retail group",
-      rating: 5,
-      body: "The WhatsApp automation paid for itself in the first month. Enquiries that used to sit unanswered overnight are now handled instantly.",
-    },
-    {
-      department: "MARKETING" as Department,
-      author: "Managing Partner",
-      role: "Professional services firm",
-      rating: 5,
-      body: "They explained the trade-offs honestly instead of overselling, then delivered on schedule. We own the code and the ad accounts — no lock-in.",
-    },
-    {
-      department: "INSTITUTE" as Department,
-      author: "Graduate, Digital Marketing with AI",
-      role: "Now freelancing",
-      rating: 5,
-      body: "The projects were real client work, not classroom exercises. I had a portfolio before the course finished and my first paying client a month later.",
-    },
-    {
-      department: "INSTITUTE" as Department,
-      author: "Graduate, Full Stack Web Development",
-      role: "Junior developer",
-      rating: 5,
-      body: "Trainers who actually build software for a living. The final project got me through my first technical interview.",
-    },
-  ];
-
-  for (const review of reviews) {
-    const exists = await prisma.review.findFirst({
-      where: { author: review.author, department: review.department },
-    });
-    if (!exists) await prisma.review.create({ data: review });
-  }
-  console.log(`   ✔ Reviews: ${reviews.length}`);
-}
-
-// -------------------------------------------------------------- Institute ---
-
-const FACULTY = [
-  {
-    reference: "BI-FAC-0001",
-    name: "Lead Trainer — Marketing",
-    title: "Senior Digital Marketing Strategist",
-    expertise: ["Digital Marketing", "Meta Ads", "Google Ads", "Analytics"],
-    groups: ["Digital Marketing"],
-  },
-  {
-    reference: "BI-FAC-0002",
-    name: "Lead Trainer — Design & Media",
-    title: "Brand & Motion Designer",
-    expertise: ["Photoshop", "Illustrator", "Premiere Pro", "After Effects"],
-    groups: ["Design & Media"],
-  },
-  {
-    reference: "BI-FAC-0003",
-    name: "Lead Trainer — Development",
-    title: "Full Stack Engineer",
-    expertise: ["React", "Next.js", "Node.js", "PostgreSQL"],
-    groups: ["Development"],
-  },
-  {
-    reference: "BI-FAC-0004",
-    name: "Lead Trainer — Artificial Intelligence",
-    title: "AI Solutions Architect",
-    expertise: ["Prompt Engineering", "AI Agents", "Automation", "RAG"],
-    groups: ["Artificial Intelligence"],
-  },
-  {
-    reference: "BI-FAC-0005",
-    name: "Lead Trainer — Business & Career",
-    title: "Freelance & Startup Mentor",
-    expertise: ["Freelancing", "Upwork", "Business Models", "Social Commerce"],
-    groups: ["Business & Career"],
-  },
-];
-
-async function seedInstitute() {
-  const facultyByGroup = new Map<string, string>();
-
-  for (const member of FACULTY) {
-    const record = await prisma.faculty.upsert({
-      where: { reference: member.reference },
-      update: { name: member.name, title: member.title, expertise: member.expertise },
-      create: {
-        reference: member.reference,
-        name: member.name,
-        title: member.title,
-        expertise: member.expertise,
-      },
-    });
-    for (const group of member.groups) facultyByGroup.set(group, record.id);
-  }
-  console.log(`   ✔ Faculty: ${FACULTY.length}`);
-
-  for (const [index, course] of INSTITUTE_COURSES.entries()) {
-    const data = {
-      name: course.name,
-      group: course.group,
-      tagline: course.tagline,
-      overview: course.overview,
-      curriculum: course.curriculum,
-      duration: course.duration,
-      feeFrom: course.fee.startingAt,
-      feeModel: course.fee.model,
-      feeNote: course.fee.note,
-      instalments: course.instalments as unknown as Prisma.InputJsonValue,
-      careers: course.careers,
-      projects: course.projects,
-      certification: course.certification,
-      eligibility: course.eligibility,
-      facultyId: facultyByGroup.get(course.group) ?? null,
-      sortOrder: index,
-    };
-
-    await prisma.course.upsert({
-      where: { slug: course.slug },
-      update: data,
-      create: { slug: course.slug, ...data },
-    });
-  }
-  console.log(`   ✔ Courses: ${INSTITUTE_COURSES.length}`);
-
-  // Upcoming batches for the four flagship courses, starting next month.
-  const flagship = [
-    "digital-marketing-with-ai",
-    "graphic-designing",
-    "full-stack-web-development",
-    "freelancing",
-  ];
-  const start = new Date();
-  start.setMonth(start.getMonth() + 1, 1);
-  start.setHours(0, 0, 0, 0);
-
-  const schedules = [
-    "Mon / Wed / Fri · 6:00 – 8:00 PM",
-    "Tue / Thu / Sat · 2:00 – 4:00 PM",
-    "Mon – Thu · 9:00 – 11:00 AM",
-    "Sat & Sun · 10:00 AM – 1:00 PM",
-  ];
-
-  for (const [index, slug] of flagship.entries()) {
-    const course = await prisma.course.findUnique({
-      where: { slug },
-      select: { id: true, facultyId: true },
-    });
-    if (!course) continue;
-
-    const code = `${slug.slice(0, 8).toUpperCase()}-${start.getFullYear()}-${String(
-      start.getMonth() + 1
-    ).padStart(2, "0")}`;
-
-    await prisma.batch.upsert({
-      where: { code },
-      update: { status: "ENROLLING", startDate: start, schedule: schedules[index] },
-      create: {
-        code,
-        courseId: course.id,
-        facultyId: course.facultyId,
-        status: "ENROLLING",
-        startDate: start,
-        schedule: schedules[index],
-        mode: index === 3 ? "Online / live" : "On-campus",
-        seats: 25,
-      },
-    });
-  }
-  console.log(`   ✔ Upcoming batches: ${flagship.length}`);
-}
-
-// -------------------------------------------------------- Knowledge bases ---
-
-async function seedKnowledgeBases() {
-  for (const [index, entry] of MARKETING_KNOWLEDGE_BASE.entries()) {
-    const data = {
-      kind: entry.kind,
-      category: entry.category,
-      question: entry.question,
-      answer: entry.answer,
-      keywords: entry.keywords,
-      state: "PUBLISHED" as const,
-      indexedAt: new Date(),
-      sortOrder: index,
-    };
-    await prisma.marketingKnowledge.upsert({
-      where: { slug: entry.id },
-      update: data,
-      create: { slug: entry.id, ...data },
-    });
-  }
-  console.log(`   ✔ Marketing knowledge base: ${MARKETING_KNOWLEDGE_BASE.length} entries`);
-
-  for (const [index, entry] of INSTITUTE_KNOWLEDGE_BASE.entries()) {
-    const data = {
-      kind: entry.kind,
-      category: entry.category,
-      question: entry.question,
-      answer: entry.answer,
-      keywords: entry.keywords,
-      state: "PUBLISHED" as const,
-      indexedAt: new Date(),
-      sortOrder: index,
-    };
-    await prisma.instituteKnowledge.upsert({
-      where: { slug: entry.id },
-      update: data,
-      create: { slug: entry.id, ...data },
-    });
-  }
-  console.log(`   ✔ Institute knowledge base: ${INSTITUTE_KNOWLEDGE_BASE.length} entries`);
-}
-
-// --------------------------------------------------------------- Settings ---
-
-async function seedSettings() {
-  const settings: Array<{
-    key: string;
-    group: string;
-    department: Department | null;
-    value: Prisma.InputJsonValue;
-    description: string;
-  }> = [
-    {
-      key: "branding.marketing",
-      group: "branding",
-      department: "MARKETING",
-      value: { logoUrl: "", primaryColor: "#1a3fa0", accentColor: "#0ea5e9" },
-      description: "BITSOL Marketing logo and brand colours.",
-    },
-    {
-      key: "branding.institute",
-      group: "branding",
-      department: "INSTITUTE",
-      value: { logoUrl: "", primaryColor: "#0f5f52", accentColor: "#22a06b" },
-      description: "BITSOL Institute logo and brand colours.",
-    },
-    {
-      key: "company.marketing",
-      group: "company",
-      department: "MARKETING",
-      value: {
-        name: "BITSOL Marketing",
-        phone: "+92 312 0141581",
-        email: "info@bitsolmarketing.com",
-        address: "Faisalabad, Pakistan",
-        hours: "Mon–Sat, 10:00 AM – 7:00 PM",
-      },
-      description: "Company details shown by the assistant and on the website.",
-    },
-    {
-      key: "company.institute",
-      group: "company",
-      department: "INSTITUTE",
-      value: {
-        name: "BITSOL Institute of Digital Media & Artificial Intelligence",
-        phone: "+92 312 0141581",
-        email: "admissions@bitsolinstitute.com",
-        address: "Faisalabad, Pakistan",
-        hours: "Mon–Sat, 9:00 AM – 8:00 PM",
-      },
-      description: "Institute details shown by the assistant and on the website.",
-    },
-    {
-      key: "ai.defaults",
-      group: "integrations",
-      department: null,
-      value: { provider: "claude", model: "claude-opus-4-8", maxTokens: 1400, thinking: false },
-      description: "Default AI provider settings (env vars take precedence).",
-    },
-    {
-      key: "chat.handoff",
-      group: "general",
-      department: null,
-      value: { autoTicket: true, officeHoursOnly: false },
-      description: "Human handoff behaviour for the assistant.",
-    },
-  ];
-
-  for (const setting of settings) {
-    await prisma.setting.upsert({
-      where: { key: setting.key },
-      update: { value: setting.value, group: setting.group, description: setting.description },
-      create: setting,
-    });
-  }
-  console.log(`   ✔ Settings: ${settings.length}`);
-}
-
-// ---------------------------------------------------------------- Content ---
-
-async function seedContent() {
-  const templates = [
-    {
-      key: "mk-lead-ack",
-      metaName: "mk_lead_ack",
-      department: "MARKETING" as Department,
-      name: "Lead acknowledgement",
-      body: "Hi {{1}}, thanks for contacting BITSOL Marketing. Your request {{2}} is logged and our team will call you within one working day.",
-      variables: ["name", "reference"],
-    },
-    {
-      key: "mk-meeting-confirm",
-      metaName: "mk_meeting_confirm",
-      department: "MARKETING" as Department,
-      name: "Consultation confirmed",
-      body: "Hi {{1}}, your consultation is confirmed for {{2}} at {{3}}. Reference: {{4}}.",
-      variables: ["name", "date", "time", "reference"],
-    },
-    {
-      key: "in-admission-ack",
-      metaName: "in_admission_ack",
-      department: "INSTITUTE" as Department,
-      name: "Admission inquiry acknowledgement",
-      body: "Assalam-o-Alaikum {{1}}, your admission inquiry for {{2}} is registered ({{3}}). An admission officer will call you shortly.",
-      variables: ["name", "course", "reference"],
-    },
-    {
-      key: "in-batch-reminder",
-      metaName: "in_batch_reminder",
-      department: "INSTITUTE" as Department,
-      name: "Batch starting reminder",
-      body: "Reminder: your {{1}} batch starts on {{2}}. Timings: {{3}}. Please confirm your seat.",
-      variables: ["course", "startDate", "schedule"],
-    },
-    {
-      key: "in-fee-reminder",
-      metaName: "in_fee_reminder",
-      department: "INSTITUTE" as Department,
-      name: "Fee instalment reminder",
-      body: "Hi {{1}}, your next fee instalment of {{2}} is due on {{3}}. Please visit the office or contact us to arrange payment.",
-      variables: ["name", "amount", "dueDate"],
-    },
-  ];
-
-  // Seeded as DRAFT, never APPROVED. These are starting points for wording,
-  // not templates Meta has reviewed — and a broadcast refuses to send anything
-  // that has not actually been approved in the WhatsApp Business Account.
-  // Admin ▸ Messaging ▸ WhatsApp Templates submits them and syncs the verdict.
-  for (const template of templates) {
-    await prisma.whatsappTemplate.upsert({
-      where: { key: template.key },
-      update: { name: template.name, body: template.body, variables: template.variables },
-      create: { ...template, status: "DRAFT" as const, languageCode: "en" },
-    });
-  }
-  console.log(`   ✔ WhatsApp templates: ${templates.length} (drafts — submit them to Meta to use)`);
-
-  const announcements = [
-    {
-      department: "MARKETING" as Department,
-      title: "AI automation packages now available",
-      body: "Bundle an AI chatbot with WhatsApp automation and save on the combined build. Ask the assistant for a quote.",
-    },
-    {
-      department: "INSTITUTE" as Department,
-      title: "Admissions open for the next batch",
-      body: "Seats are limited across all courses. Early-bird discounts apply before the registration deadline — start an admission inquiry to reserve yours.",
-    },
-  ];
-
-  for (const announcement of announcements) {
-    const exists = await prisma.announcement.findFirst({ where: { title: announcement.title } });
-    if (!exists) await prisma.announcement.create({ data: announcement });
-  }
-  console.log(`   ✔ Announcements: ${announcements.length}`);
-
-  const eventStart = new Date();
-  eventStart.setDate(eventStart.getDate() + 14);
-  eventStart.setHours(15, 0, 0, 0);
-
-  const events = [
-    {
-      slug: "free-ai-freelancing-seminar",
-      department: "INSTITUTE" as Department,
-      title: "Free seminar: Earning online with AI",
-      summary:
-        "A free two-hour session on which AI skills are actually earning money right now, and how to get your first freelance client.",
-      location: "BITSOL Institute campus, Faisalabad",
-      startsAt: eventStart,
-    },
-    {
-      slug: "ai-for-business-workshop",
-      department: "MARKETING" as Department,
-      title: "Workshop: AI automation for local businesses",
-      summary:
-        "A hands-on workshop for business owners on automating customer replies, follow-ups and reporting.",
-      location: "Online",
-      startsAt: new Date(eventStart.getTime() + 7 * 24 * 60 * 60 * 1000),
-    },
-  ];
-
-  for (const event of events) {
-    await prisma.event.upsert({
-      where: { slug: event.slug },
-      update: { title: event.title, summary: event.summary, startsAt: event.startsAt },
-      create: event,
-    });
-  }
-  console.log(`   ✔ Events: ${events.length}`);
+  console.log("🎉 Seeding completed successfully!");
 }
 
 main()
   .catch((e) => {
-    console.error("❌  Seed failed:", e);
+    console.error("❌ Seeding error:", e);
     process.exit(1);
   })
   .finally(async () => {

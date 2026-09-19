@@ -1,17 +1,7 @@
 "use client";
 
 /**
- * Root error boundary.
- *
- * Catches failures in the root layout itself, which the per-route `error.tsx`
- * cannot. Because it replaces the whole document, it must render its own
- * <html> and <body> — that is a hard App Router requirement.
- *
- * Like `not-found.tsx`, defining this keeps `next build` from falling back to
- * the pages-router error document when prerendering /_error.
- *
- * Styling is inline: if the root layout failed, the stylesheet may not have
- * loaded either, and an error page that itself renders broken helps nobody.
+ * Root error boundary for A-ONE Restaurant portal.
  */
 export default function GlobalError({
   error,
@@ -29,15 +19,15 @@ export default function GlobalError({
           display: "grid",
           placeItems: "center",
           padding: "1.5rem",
-          background: "linear-gradient(160deg, #1b2559, #3b2f8a)",
+          background: "linear-gradient(160deg, #0a0a0a, #1c1917)",
           color: "white",
           fontFamily:
             'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
         }}
       >
         <div style={{ maxWidth: "28rem", textAlign: "center" }}>
-          <h1 style={{ fontSize: "1.25rem", fontWeight: 600, margin: 0 }}>
-            Something went wrong
+          <h1 style={{ fontSize: "1.25rem", fontWeight: 700, margin: 0, color: "#f59e0b" }}>
+            A-ONE Operations Error
           </h1>
           <p
             style={{
@@ -47,8 +37,7 @@ export default function GlobalError({
               color: "rgba(255,255,255,0.75)",
             }}
           >
-            The BITSOL AI Assistant hit an unexpected error. Please try again — if it
-            keeps happening, contact us and we&apos;ll look into it.
+            An unexpected error occurred. Please try refreshing or return to the management portal.
           </p>
 
           {error.digest && (
@@ -60,27 +49,48 @@ export default function GlobalError({
                 color: "rgba(255,255,255,0.45)",
               }}
             >
-              Reference: {error.digest}
+              Digest: {error.digest}
             </p>
           )}
 
-          <button
-            type="button"
-            onClick={reset}
+          <div
             style={{
-              marginTop: "1.75rem",
-              padding: "0.625rem 1.5rem",
-              borderRadius: "9999px",
-              border: "none",
-              background: "white",
-              color: "#1b2559",
-              fontSize: "0.875rem",
-              fontWeight: 500,
-              cursor: "pointer",
+              marginTop: "2rem",
+              display: "flex",
+              gap: "0.75rem",
+              justifyContent: "center",
             }}
           >
-            Try again
-          </button>
+            <button
+              onClick={() => reset()}
+              style={{
+                padding: "0.625rem 1.25rem",
+                borderRadius: "0.5rem",
+                background: "#f59e0b",
+                color: "#0a0a0a",
+                fontWeight: 700,
+                fontSize: "0.875rem",
+                border: "none",
+                cursor: "pointer",
+              }}
+            >
+              Try again
+            </button>
+            <a
+              href="/admin"
+              style={{
+                padding: "0.625rem 1.25rem",
+                borderRadius: "0.5rem",
+                background: "rgba(255,255,255,0.1)",
+                color: "white",
+                fontWeight: 500,
+                fontSize: "0.875rem",
+                textDecoration: "none",
+              }}
+            >
+              Back to Operations
+            </a>
+          </div>
         </div>
       </body>
     </html>

@@ -5,7 +5,7 @@ import { config } from "@/lib/config";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** Liveness + dependency health probe (used by Docker/Nginx/monitoring). */
+/** Liveness + dependency health probe for A-ONE Restaurant. */
 export async function GET() {
   const checks: Record<string, "ok" | "down" | "skipped"> = {
     app: "ok",
@@ -13,7 +13,7 @@ export async function GET() {
     redis: "skipped",
   };
 
-  if (config.databaseUrl) {
+  if (config.db.url) {
     try {
       await prisma.$queryRaw`SELECT 1`;
       checks.database = "ok";
@@ -36,6 +36,7 @@ export async function GET() {
   return Response.json(
     {
       status: healthy ? "healthy" : "degraded",
+      restaurant: "A-ONE Restaurant",
       provider: config.ai.provider,
       model: config.ai.model,
       checks,

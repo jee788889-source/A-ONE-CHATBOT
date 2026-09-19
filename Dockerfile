@@ -1,7 +1,7 @@
 # =============================================================================
-#  BITSOL AI Assistant — Production Dockerfile
+#  A-ONE Restaurant — Production Dockerfile
 #  Multi-stage build producing a lean Next.js standalone server.
-#  Designed & Developed by BITSOL MARKETING
+#  Copyright (c) A-ONE Restaurant.
 # =============================================================================
 
 # ---- 1. Dependencies -------------------------------------------------------
@@ -10,7 +10,6 @@ RUN apk add --no-cache libc6-compat openssl
 WORKDIR /app
 COPY package.json package-lock.json* ./
 COPY prisma ./prisma
-# Install with a lockfile if present, otherwise a plain install.
 RUN npm ci || npm install
 
 # ---- 2. Build --------------------------------------------------------------
@@ -20,10 +19,6 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
-# Opts this build into `output: "standalone"` (see next.config.mjs). Only Docker
-# wants it: the runner stage below copies .next/standalone/server.js. A managed
-# host that runs `next start` must NOT get a standalone build, because Next
-# refuses to serve one that way.
 ENV DOCKER_BUILD=1
 RUN npx prisma generate && npm run build
 

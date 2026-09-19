@@ -33,22 +33,20 @@ export type ReferenceKind =
   | "BCAST";
 
 /**
- * Build a department-scoped reference, e.g. `BM-LEAD-7F3K2Q9A` (Marketing lead)
- * or `BI-ADM-4X8T2M6C` (Institute admission inquiry). The department prefix
- * makes it immediately obvious which business a reference belongs to — useful
- * on the CRM board, in WhatsApp replies and in support calls.
+ * Build a department-scoped reference, e.g. `AONE-ORD-7F3K2Q9A` (Order reference)
+ * or `KTN-ORD-4X8T2M6C` (Kitchen reference).
  */
 export function generateReference(
   kind: ReferenceKind,
   department: Department,
   length = 8
 ): string {
-  return `${BRANDS[department].referencePrefix}-${kind}-${shortId(length)}`;
+  return `${BRANDS[department].referencePrefix}${kind}-${shortId(length)}`;
 }
 
-/** Conversation reference used before a department has been chosen. */
+/** Conversation reference used for A-ONE conversations. */
 export function generateConversationReference(): string {
-  return `BX-CONV-${shortId(10)}`;
+  return `AONE-CONV-${shortId(10)}`;
 }
 
 /** Very light script check: true if the text contains Urdu/Punjabi (Arabic) script. */
