@@ -62,7 +62,13 @@ const schema = z.object({
   ORDER_NOTIFY_PHONE: optional,
 });
 
-const parsed = schema.safeParse(process.env);
+// A variable left blank in a hosting panel (`WHATSAPP_API_VERSION=`) counts as
+// unset, so it gets its default instead of an empty string.
+const source: Record<string, string | undefined> = Object.fromEntries(
+  Object.keys(schema.shape).map((key) => [key, process.env[key]?.trim() || undefined])
+);
+
+const parsed = schema.safeParse(source);
 
 if (!parsed.success) {
   console.warn(
@@ -71,7 +77,18 @@ if (!parsed.success) {
   );
 }
 
-const env = parsed.success ? parsed.data : schema.parse({});
+// Drop only the invalid variables and keep the rest. Falling back to an empty
+// environment here would also discard the WhatsApp and database credentials,
+// and one bad value (e.g. AI_PROVIDER=OpenRouter) would silence the bot.
+const env = parsed.success
+  ? parsed.data
+  : schema.parse(
+      Object.fromEntries(
+        Object.entries(source).filter(
+          ([key]) => !parsed.error.issues.some((issue) => issue.path[0] === key)
+        )
+      )
+    );
 
 const activeAIProvider =
   env.AI_PROVIDER === "openrouter" || (Boolean(env.OPENROUTER_API_KEY) && env.AI_PROVIDER === "anthropic" && !env.ANTHROPIC_API_KEY)

@@ -67,6 +67,14 @@ export async function POST(req: NextRequest) {
         failed: "FAILED",
       };
       const dbStatus = statusMap[status.status];
+      if (dbStatus === "FAILED") {
+        // Meta accepted the send but could not deliver it (e.g. #131047 outside
+        // the 24h window, #131030 number not on a test app's recipient list).
+        console.error(
+          `[whatsapp] delivery to ${status.recipient_id} failed:`,
+          JSON.stringify(status.errors ?? [])
+        );
+      }
       if (dbStatus) {
         await prisma.message
           .updateMany({
