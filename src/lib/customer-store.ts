@@ -196,3 +196,58 @@ export async function updateCustomerProfile(
   memoryCustomers[memIdx] = updated;
   return updated;
 }
+
+/**
+ * Permanently delete a customer, their orders, and conversation records
+ */
+export async function deleteCustomerById(id: string): Promise<boolean> {
+  try {
+    // 1. Find all orders belonging to customer
+    const orders = await prisma.order.findMany({
+      where: { customerId: id },
+      select: { id: true },
+    });
+    const orderIds = orders.map((o) => o.id);
+
+    // 2. Delete order items
+    if (orderIds.length > 0) {
+      await prisma.orderItem.deleteMany({
+        where: { orderId: { in: orderIds } },
+      });
+      // 3. Delete orders
+      await prisma.order.deleteMany({
+        where: { id: { in: orderIds } },
+      });
+    }
+
+    // 4. Find all conversations and delete messages
+    const convs = await prisma.conversation.findMany({
+      where: { customerId: id },
+      select: { id: true },
+    });
+    const convIds = convs.map((c) => c.id);
+    if (convIds.length > 0) {
+      await prisma.message.deleteMany({
+        where: { conversationId: { in: convIds } },
+      });
+      await prisma.conversation.deleteMany({
+        where: { id: { in: convIds } },
+      });
+    }
+
+    // 5. Delete customer record
+    await prisma.customer.delete({
+      where: { id },
+    });
+  } catch (err: any) {
+    console.warn("[customer-store:deleteCustomerById] database notice:", err?.message || err);
+  }
+
+  // Remove from in-memory store
+  const idx = memoryCustomers.findIndex((c) => c.id === id);
+  if (idx !== -1) {
+    memoryCustomers.splice(idx, 1);
+  }
+
+  return true;
+}

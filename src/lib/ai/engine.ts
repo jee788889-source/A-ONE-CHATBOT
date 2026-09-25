@@ -25,12 +25,20 @@ import {
   formatCartText,
 } from "./cart";
 import { parseNlu, parseQuantity, type NluResult } from "./nlu";
-import type { ReplyButton } from "@/lib/whatsapp/types";
+import type { ReplyButton, ListRow } from "@/lib/whatsapp/types";
+import { MENU_CATEGORIES_LIST, MENU_DATA, findItemById } from "@/lib/whatsapp/menu-catalog";
+import { getRestaurantSettings } from "@/lib/settings-store";
+import { generateMultiProviderReply } from "@/lib/ai/multi-provider";
 import { getProvider } from "./index";
 
 export interface BotReply {
   text: string;
   buttons?: ReplyButton[];
+  list?: {
+    buttonLabel: string;
+    header?: string;
+    rows: ListRow[];
+  };
   isHandoff?: boolean;
   orderCreated?: {
     orderNumber: string;
@@ -55,6 +63,123 @@ export async function processCustomerMessage(params: {
     const { rawText, conversationId, customerId, customerPhone, customerName } = params;
     const cleanText = rawText.trim();
     const lower = cleanText.toLowerCase();
+
+    // 0. Direct Native WhatsApp Interactive Routing (Language / Menu / Categories / Items / Confirm)
+    if (cleanText === "btn_change_lang" || cleanText === "language" || cleanText === "zaban") {
+      return {
+        text: "Assalam-o-Alaikum! A-One Foods mein khushamdeed.\nApni zaban muntakhib karein / Select Language:",
+        buttons: [
+          { id: "set_lang_roman", title: "🇵🇰 Roman Urdu" },
+          { id: "set_lang_urdu", title: "🇵🇰 اردو" },
+          { id: "set_lang_en", title: "🇬🇧 English" },
+        ],
+      };
+    }
+
+    if (
+      cleanText === "set_lang_roman" ||
+      cleanText === "set_lang_urdu" ||
+      cleanText === "set_lang_en" ||
+      cleanText === "lang_roman" ||
+      cleanText === "lang_urdu" ||
+      cleanText === "lang_en"
+    ) {
+      const selectedLang = cleanText.includes("urdu") ? "ur" : cleanText.includes("en") ? "en" : "roman";
+      await updateConversationState(conversationId, { language: selectedLang }, customerId);
+      
+      let bodyText = "Aapki khidmat ke liye hazir hain. Khana dekhne ke liye neeche button par tap karein:";
+      let btnMenu = "📜 View Menu";
+      let btnDeals = "🔥 Special Deals";
+      let btnStaff = "👨‍🍳 Staff Support";
+
+      if (selectedLang === "ur") {
+        bodyText = "اے ون فوڈز میں خوش آمدید! کھانا دیکھنے کے لیے نیچے دیے گئے بٹن پر ٹیپ کریں:";
+        btnMenu = "📜 مینو دیکھیں";
+        btnDeals = "🔥 اسپیشل ڈیلز";
+        btnStaff = "👨‍🍳 عملے سے رابطہ";
+      } else if (selectedLang === "en") {
+        bodyText = "Welcome to A-One Foods! Please tap a button below to view our menu and deals:";
+      }
+
+      return {
+        text: bodyText,
+        buttons: [
+          { id: "btn_show_menu", title: btnMenu.slice(0, 20) },
+          { id: "btn_show_deals", title: btnDeals.slice(0, 20) },
+          { id: "btn_staff_help", title: btnStaff.slice(0, 20) },
+        ],
+      };
+    }
+
+    if (cleanText === "btn_show_menu" || cleanText === "act:view_menu") {
+      return {
+        text: "Categories dekhne ke liye neeche button par tap karein:",
+        list: {
+          buttonLabel: "Categories",
+          header: "A-One Foods Menu",
+          rows: MENU_CATEGORIES_LIST,
+        },
+      };
+    }
+
+    if (cleanText === "btn_show_deals") {
+      return {
+        text: "Apna manpasand deal select karein:",
+        list: {
+          buttonLabel: "Special Deals",
+          header: "🔥 Special Deals",
+          rows: MENU_DATA.cat_special_deals.rows,
+        },
+      };
+    }
+
+    if (cleanText.startsWith("cat_")) {
+      const cat = MENU_DATA[cleanText] || MENU_DATA.cat_special_deals;
+      if (cat) {
+        return {
+          text: "Apna item select karein:",
+          list: {
+            buttonLabel: "Items List",
+            header: cat.title.substring(0, 60),
+            rows: cat.rows.slice(0, 10),
+          },
+        };
+      }
+    }
+
+    const clickedItem = findItemById(cleanText);
+    if (clickedItem) {
+      await updateConversationState(
+        conversationId,
+        {
+          pendingOrderConfirmation: true,
+          lastDiscussedItem: {
+            name: clickedItem.title,
+            price: 0,
+          },
+        },
+        customerId
+      );
+      return {
+        text: `Aapne select kiya: *${clickedItem.title}*\n${clickedItem.description}\n\nKya yehi finalize karna hai?`,
+        buttons: [
+          { id: "btn_confirm_order", title: "✅ Order Now" },
+          { id: "btn_show_menu", title: "➕ Aur Dekhein" },
+          { id: "btn_change_lang", title: "🌐 Zaban Badlein" },
+        ],
+      };
+    }
+
+    if (cleanText === "btn_confirm_item" || cleanText === "btn_confirm_order") {
+      await updateConversationState(
+        conversationId,
+        { pendingOrderConfirmation: true },
+        customerId
+      );
+      return {
+        text: "Meharbani farma kar Quantity (1, 2...) aur Delivery Address likh kar bhej dein.",
+      };
+    }
 
     // 1. Check conversation status & Human Handoff State
     let conversationStatus = "OPEN";
@@ -105,7 +230,7 @@ export async function processCustomerMessage(params: {
     // =========================================================================
 
     // A. HUMAN HANDOFF REQUEST
-    if (nlu.intent === "REQUEST_HUMAN") {
+    if (nlu.intent === "REQUEST_HUMAN" || cleanText === "btn_staff_help") {
       await handoff_to_staff(conversationId);
       await updateConversationState(conversationId, { isHumanHandoff: true }, customerId);
       return {
@@ -117,46 +242,35 @@ export async function processCustomerMessage(params: {
       };
     }
 
-    // B. GREETING
+    // B. GREETING -> Language Selection
     if (nlu.intent === "GREETING") {
+      let welcome = "Assalam-o-Alaikum! A-One Foods mein khushamdeed. Zaban muntakhib karein / Select language:";
+      try {
+        const { settings } = await getRestaurantSettings();
+        if (settings?.whatsappConfig?.welcomeMessage) {
+          welcome = settings.whatsappConfig.welcomeMessage;
+        }
+      } catch {}
+
       return {
-        text:
-          lang === "ur"
-            ? "وعلیکم السلام! 🍔 *اے ون ریسٹورنٹ* میں خوش آمدید۔\n\nہم آپ کے لیے کیا پیش کریں؟ مینو دیکھنے کے لیے *Menu* لکھیں یا نیچے سے آپشن منتخب کریں۔"
-            : "Assalam-o-Alaikum! 🍔 Welcome to *A-ONE Restaurant*.\n\nTaste of Purity, Tradition of Quality. How may we serve you today?\n\nReply with your order or browse our menu below.",
+        text: welcome,
         buttons: [
-          { id: "act:view_menu", title: "📋 View Menu" },
-          { id: "act:view_cart", title: "🛒 View Cart" },
-          { id: "act:talk_staff", title: "👨‍🍳 Staff Support" },
+          { id: "lang_roman", title: "🇵🇰 Roman Urdu" },
+          { id: "lang_urdu", title: "🇵🇰 اردو" },
+          { id: "lang_en", title: "🇬🇧 English" },
         ],
       };
     }
 
-    // C. VIEW MENU
+    // C. VIEW MENU -> Native WhatsApp Interactive List (No text dumping)
     if (nlu.intent === "VIEW_MENU") {
-      const menuData = await get_menu();
-      let menuContent = "🍔 *A-ONE RESTAURANT MENU* 🍕\n\n";
-
-      for (const cat of menuData.categories) {
-        menuContent += `*${cat.name.toUpperCase()}*\n`;
-        for (const item of cat.items) {
-          menuContent += `• *${item.name}* — Rs. ${item.price}\n`;
-          if (item.description) {
-            menuContent += `  _${item.description}_\n`;
-          }
-        }
-        menuContent += "\n";
-      }
-
-      menuContent += "💬 _Order karne ke liye item ka naam aur quantity batayein! (e.g. '2 Beef Smash Burger' ya '5 Samosay')_";
-
       return {
-        text: menuContent,
-        buttons: [
-          { id: "act:view_cart", title: "🛒 View Cart" },
-          { id: "act:order_now", title: "🛒 Order Now" },
-          { id: "act:talk_staff", title: "👨‍🍳 Staff Support" },
-        ],
+        text: "Categories dekhne ke liye neeche button par tap karein:",
+        list: {
+          buttonLabel: "Categories",
+          header: "A-One Foods Menu",
+          rows: MENU_CATEGORIES_LIST,
+        },
       };
     }
 
@@ -678,78 +792,38 @@ export async function processCustomerMessage(params: {
     }
 
     // =========================================================================
-    //  LLM PROVIDER ASSISTANCE WITH ZERO-HALLUCINATION GUARDRAILS
+    //  MULTI-PROVIDER AI ASSISTANCE WITH STRICT ZERO-HALLUCINATION GUARDRAILS
     // =========================================================================
 
+    const langName = lang === "ur" ? "Urdu" : lang === "en" ? "English" : "Roman Urdu";
+    const strictInstruction = `You are the customer assistant for A-One Foods. You must respond in STRICTLY ${langName} (Roman Urdu by default). Maximum 1 short sentence. NEVER generate menu lists or prices. Always tell the user to click the menu button below to order.`;
+
     try {
-      // Build factual context from DB
-      const menuData = await get_menu();
-      const menuSummary = menuData.categories
-        .map(
-          (c) =>
-            `${c.name}: ` +
-            c.items.map((i) => `${i.name} (Rs. ${i.price})`).join(", ")
-        )
-        .join("\n");
-
-      const deliveryInfo = await get_delivery_charge();
-      const { hoursDescription, liveStatus } = await get_opening_hours();
-
-      const systemPrompt = `You are the official conversational AI assistant for "A-ONE Restaurant", a premier Pakistani restaurant serving burgers, biryani, BBQ, pizzas, and traditional savories.
-
-CRITICAL GUARDRAILS:
-1. ONLY use the verified factual restaurant data below.
-2. NEVER hallucinate prices, deals, discounts, or items not listed below.
-3. If an item is not found, politely inform the customer and suggest available items.
-4. Support English, Urdu, and Roman Urdu. Match the customer's language.
-5. If customer wants to order outside business hours, politely inform them that ordering is currently closed and provide the opening hours.
-6. If customer asks general information (menu, prices, location, timing), answer accurately using the data below regardless of opening hours.
-
-VERIFIED MENU & PRICES:
-${menuSummary}
-
-DELIVERY CHARGES:
-Standard: Rs. ${deliveryInfo.deliveryFee} | Free above: Rs. ${deliveryInfo.freeDeliveryThreshold} | Minimum Order: Rs. ${deliveryInfo.minOrderAmount}
-
-RESTAURANT STATUS:
-${liveStatus.isOpen ? "🟢 CURRENTLY OPEN" : "🔴 CURRENTLY CLOSED: " + liveStatus.message}
-
-SCHEDULE & HOURS:
-${hoursDescription}`;
-
-      const provider = getProvider();
-      let responseText = "";
-
-      for await (const chunk of provider.streamChat({
-        system: systemPrompt,
-        messages: [{ role: "user", content: cleanText }],
-      })) {
-        responseText += chunk;
-      }
-
-      if (responseText.trim()) {
+      const aiResult = await generateMultiProviderReply(cleanText, strictInstruction);
+      if (aiResult.text) {
         return {
-          text: responseText.trim(),
+          text: aiResult.text,
           buttons: [
-            { id: "act:view_menu", title: "📋 View Menu" },
-            { id: "act:view_cart", title: "🛒 View Cart" },
+            { id: "btn_show_menu", title: "📜 View Menu" },
+            { id: "btn_show_deals", title: "🔥 Special Deals" },
+            { id: "btn_staff_help", title: "👨‍🍳 Staff Support" },
           ],
         };
       }
     } catch (llmError) {
-      console.warn("[ai-engine] LLM provider error/timeout, using safe fallback:", (llmError as any)?.message);
+      console.warn("[ai-engine] Multi-provider LLM error, using safe fallback:", (llmError as any)?.message);
     }
 
     // Safe multi-lingual fallback when LLM is unavailable or times out
     return {
       text:
         lang === "ur"
-          ? "اے ون ریسٹورنٹ میں خوش آمدید! آپ ہمارے مینو سے لذیذ کھانے اور کرسپی نمکو آرڈر کر سکتے ہیں۔ مینو دیکھنے کے لیے *Menu* لکھیں۔"
-          : "Welcome to A-ONE Restaurant! You can browse our delicious menu, place an order, or check your cart.\n\nReply *Menu* to see all items or *Order* to checkout.",
+          ? "اے ون فوڈز میں خوش آمدید! مینو دیکھنے اور آرڈر کرنے کے لیے نیچے دیے گئے 'View Menu' پر ٹیپ کریں۔"
+          : "Assalam-o-Alaikum! A-One Foods mein khushamdeed. Menu dekhne aur order karne ke liye 'View Menu' button par tap karein.",
       buttons: [
-        { id: "act:view_menu", title: "📋 View Menu" },
-        { id: "act:view_cart", title: "🛒 View Cart" },
-        { id: "act:talk_staff", title: "👨‍🍳 Staff Support" },
+        { id: "btn_show_menu", title: "📜 View Menu" },
+        { id: "btn_show_deals", title: "🔥 Special Deals" },
+        { id: "btn_staff_help", title: "👨‍🍳 Staff Support" },
       ],
     };
   });

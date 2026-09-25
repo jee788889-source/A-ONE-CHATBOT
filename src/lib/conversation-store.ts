@@ -97,3 +97,20 @@ export async function fetchConversations(status?: string | null, search?: string
   }
   return filtered;
 }
+
+export async function deleteConversation(id: string): Promise<{ ok: boolean }> {
+  try {
+    await prisma.conversation.delete({
+      where: { id },
+    });
+  } catch (err: any) {
+    console.warn("[conversation-store:deleteConversation] db delete notice:", err?.message || err);
+  }
+
+  const idx = memoryConversations.findIndex((c) => c.id === id);
+  if (idx !== -1) {
+    memoryConversations.splice(idx, 1);
+  }
+  return { ok: true };
+}
+

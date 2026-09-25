@@ -29,6 +29,12 @@ import {
   BellRing,
   Headphones,
   Flame,
+  Trash2,
+  X,
+  Info,
+  DollarSign,
+  Package,
+  AlertTriangle,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -41,6 +47,7 @@ interface RecentOrder {
   status: string;
   paymentStatus: string;
   createdAt: string;
+  deliveryAddress?: string | null;
   items: Array<{ itemName: string; quantity: number; unitPrice: number }>;
 }
 
@@ -73,6 +80,15 @@ interface Message {
   createdAt: string;
 }
 
+interface CurrentUser {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  status: string;
+  isOwner?: boolean;
+}
+
 // Play notification sound using Web Audio API
 function playAlertChime() {
   try {
@@ -100,6 +116,7 @@ function playAlertChime() {
 }
 
 export default function ConversationsInboxPage() {
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -110,6 +127,11 @@ export default function ConversationsInboxPage() {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sending, setSending] = useState(false);
   const [togglingStatus, setTogglingStatus] = useState(false);
+  const [deletingConv, setDeletingConv] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showDeleteCustomerModal, setShowDeleteCustomerModal] = useState(false);
+  const [deletingCustomer, setDeletingCustomer] = useState(false);
+  const [showProfileDrawer, setShowProfileDrawer] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [activeAlert, setActiveAlert] = useState<string | null>(null);
 
@@ -117,6 +139,30 @@ export default function ConversationsInboxPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const selectedConv = conversations.find((c) => c.id === selectedConvId);
+
+  // Determine Owner Role strictly
+  const isOwnerUser = Boolean(
+    currentUser?.isOwner ||
+    currentUser?.role === "OWNER" ||
+    currentUser?.role === "ADMIN_OWNER" ||
+    currentUser?.role?.toLowerCase() === "owner"
+  );
+
+  // 0. Fetch Current Authenticated User Session
+  useEffect(() => {
+    async function fetchUser() {
+      try {
+        const res = await fetch("/api/auth/me");
+        const data = await res.json();
+        if (data.ok && data.user) {
+          setCurrentUser(data.user);
+        }
+      } catch (err) {
+        console.warn("Could not fetch user session:", err);
+      }
+    }
+    fetchUser();
+  }, []);
 
   // 1. Fetch conversations list
   const loadConversations = useCallback(async () => {
@@ -242,6 +288,8 @@ export default function ConversationsInboxPage() {
     }
   }
 
+  const [sendingBusy, setSendingBusy] = useState(false);
+
   // 4. Toggle AI Takeover vs Resume
   async function handleToggleTakeover(targetStatus: "PENDING" | "OPEN") {
     if (!selectedConv || togglingStatus) return;
@@ -251,13 +299,20 @@ export default function ConversationsInboxPage() {
       const res = await fetch("/api/admin/conversations", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: selectedConv.id, status: targetStatus }),
+        body: JSON.stringify({
+          id: selectedConv.id,
+          status: targetStatus,
+          action: targetStatus === "OPEN" ? "RESUME_AI" : "HUMAN_TAKEOVER",
+        }),
       });
       const data = await res.json();
       if (data.ok) {
         setConversations((prev) =>
           prev.map((c) => (c.id === selectedConv.id ? { ...c, status: targetStatus } : c))
         );
+        if (data.message) {
+          setMessages((prev) => [...prev, data.message]);
+        }
       }
     } catch (err) {
       console.error("Takeover toggle error:", err);
@@ -266,9 +321,275 @@ export default function ConversationsInboxPage() {
     }
   }
 
+  // 4b. 1-Click Staff Busy Quick Action
+  async function handleSendStaffBusy() {
+    if (!selectedConv || sendingBusy) return;
+    setSendingBusy(true);
+
+    try {
+      const res = await fetch("/api/admin/conversations", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: selectedConv.id,
+          action: "STAFF_BUSY",
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        if (selectedConv.status !== "PENDING") {
+          setConversations((prev) =>
+            prev.map((c) => (c.id === selectedConv.id ? { ...c, status: "PENDING" } : c))
+          );
+        }
+        if (data.message) {
+          setMessages((prev) => [...prev, data.message]);
+        }
+      }
+    } catch (err) {
+      console.error("Staff busy action error:", err);
+    } finally {
+      setSendingBusy(false);
+    }
+  }
+
+  // 5. Owner-Only Delete Conversation
+  async function handleDeleteConversation() {
+    if (!selectedConv || !isOwnerUser || deletingConv) return;
+    setDeletingConv(true);
+
+    try {
+      const res = await fetch(`/api/conversations/${selectedConv.id}`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setShowDeleteModal(false);
+        const remaining = conversations.filter((c) => c.id !== selectedConv.id);
+        setConversations(remaining);
+        setSelectedConvId(remaining.length > 0 ? remaining[0].id : null);
+        setMessages([]);
+      } else {
+        alert("Failed to delete conversation: " + (data.error || "Permission denied"));
+      }
+    } catch (err: any) {
+      alert("Delete Error: " + err.message);
+    } finally {
+      setDeletingConv(false);
+    }
+  }
+
+  // 6. Owner-Only Delete Customer & Complete History
+  async function handleDeleteCustomerAndHistory() {
+    if (!selectedConv || !isOwnerUser || deletingCustomer) return;
+    setDeletingCustomer(true);
+
+    try {
+      const res = await fetch(`/api/admin/customers/${selectedConv.customerId}`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setShowDeleteCustomerModal(false);
+        const remaining = conversations.filter(
+          (c) => c.customerId !== selectedConv.customerId && c.id !== selectedConv.id
+        );
+        setConversations(remaining);
+        setSelectedConvId(remaining.length > 0 ? remaining[0].id : null);
+        setMessages([]);
+      } else {
+        alert("Failed to delete customer: " + (data.error || "Permission denied"));
+      }
+    } catch (err: any) {
+      alert("Delete Customer Error: " + err.message);
+    } finally {
+      setDeletingCustomer(false);
+    }
+  }
+
   function handleQuickReply(text: string) {
     setReplyText(text);
   }
+
+  // Collect distinct addresses used by this customer
+  const usedAddresses = Array.from(
+    new Set([
+      selectedConv?.customerAddress,
+      ...(selectedConv?.recentOrders?.map((o) => o.deliveryAddress) || []),
+    ].filter(Boolean))
+  ) as string[];
+
+  // Render Customer Profile Section Content
+  const renderProfileContent = () => {
+    if (!selectedConv) {
+      return <p className="text-neutral-500 text-center py-8">No customer selected.</p>;
+    }
+
+    return (
+      <div className="space-y-4 text-xs">
+        {/* Customer Identity Card */}
+        <div className="p-3.5 rounded-xl bg-neutral-950 border border-neutral-800 space-y-2.5">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="size-8 rounded-lg bg-amber-500/20 text-amber-400 font-black flex items-center justify-center text-xs shrink-0 border border-amber-500/30">
+                {(selectedConv.customerName || selectedConv.customerPhone).charAt(0).toUpperCase()}
+              </div>
+              <div className="min-w-0">
+                <p className="font-bold text-xs text-white truncate">
+                  {selectedConv.customerName || "Customer"}
+                </p>
+                <p className="text-[10px] text-neutral-400 font-mono flex items-center gap-1">
+                  <Phone className="size-2.5 text-amber-500" />
+                  {selectedConv.customerPhone}
+                </p>
+              </div>
+            </div>
+            <span
+              className={`text-[9px] font-extrabold px-2 py-0.5 rounded border uppercase tracking-wider shrink-0 ${
+                selectedConv.status === "PENDING"
+                  ? "bg-red-500/20 text-red-400 border-red-500/40 animate-pulse"
+                  : "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+              }`}
+            >
+              {selectedConv.status === "PENDING" ? "Human Mode" : "AI Active"}
+            </span>
+          </div>
+
+          {/* Quick Stats Grid */}
+          <div className="grid grid-cols-2 gap-2 pt-1 border-t border-neutral-800/80">
+            <div className="p-2 rounded-lg bg-neutral-900/90 border border-neutral-800">
+              <p className="text-[10px] text-neutral-400 font-semibold uppercase flex items-center gap-1">
+                <Package className="size-3 text-amber-400" /> Lifetime Orders
+              </p>
+              <p className="text-sm font-black text-white mt-0.5">
+                {selectedConv.totalOrders || selectedConv.recentOrders?.length || 0}
+              </p>
+            </div>
+            <div className="p-2 rounded-lg bg-neutral-900/90 border border-neutral-800">
+              <p className="text-[10px] text-neutral-400 font-semibold uppercase flex items-center gap-1">
+                <DollarSign className="size-3 text-emerald-400" /> Total Spent
+              </p>
+              <p className="text-sm font-black text-emerald-400 mt-0.5">
+                Rs. {(selectedConv.totalSpent || 0).toLocaleString()}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Previously Used Delivery Addresses */}
+        <div className="space-y-2">
+          <p className="font-bold uppercase tracking-wider text-neutral-400 text-[10px] flex items-center justify-between">
+            <span className="flex items-center gap-1.5">
+              <MapPin className="size-3 text-amber-500" /> Delivery Addresses
+            </span>
+            <span className="text-neutral-500">{usedAddresses.length} saved</span>
+          </p>
+          <div className="space-y-1.5">
+            {usedAddresses.length > 0 ? (
+              usedAddresses.map((addr, idx) => (
+                <div
+                  key={idx}
+                  className="p-2.5 rounded-lg bg-neutral-950 border border-neutral-800/80 flex items-start gap-2 text-neutral-300 text-[11px] leading-relaxed"
+                >
+                  <MapPin className="size-3.5 text-amber-500 shrink-0 mt-0.5" />
+                  <span className="break-words">{addr}</span>
+                </div>
+              ))
+            ) : (
+              <p className="text-[11px] text-neutral-500 text-center py-2 bg-neutral-950/60 rounded-lg border border-neutral-800">
+                No delivery address saved yet.
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* Customer Orders History */}
+        <div className="space-y-2">
+          <p className="font-bold uppercase tracking-wider text-neutral-400 text-[10px] flex items-center justify-between">
+            <span className="flex items-center gap-1.5">
+              <ShoppingBag className="size-3 text-amber-500" /> Recent Orders History
+            </span>
+            <span>{selectedConv.recentOrders?.length || 0} total</span>
+          </p>
+
+          <div className="space-y-2">
+            {selectedConv.recentOrders && selectedConv.recentOrders.length > 0 ? (
+              selectedConv.recentOrders.map((ord, ordIdx) => (
+                <div
+                  key={ord.id ? `${ord.id}-${ordIdx}` : `ord-${ordIdx}`}
+                  className="p-2.5 rounded-xl bg-neutral-950 border border-neutral-800 space-y-1.5"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono font-bold text-amber-400 text-[11px]">
+                      {ord.orderNumber}
+                    </span>
+                    <span className="text-[10px] font-bold text-white">
+                      Rs. {ord.total?.toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-[10px]">
+                    <span className="text-neutral-400">{ord.status}</span>
+                    <span
+                      className={`px-1.5 py-0.5 rounded font-semibold text-[9px] uppercase ${
+                        ord.paymentStatus === "PAID"
+                          ? "bg-emerald-500/15 text-emerald-400"
+                          : ord.paymentStatus === "PENDING_VERIFICATION"
+                          ? "bg-amber-500/20 text-amber-400"
+                          : "bg-neutral-800 text-neutral-400"
+                      }`}
+                    >
+                      {ord.paymentStatus}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-neutral-500 truncate">
+                    {ord.items?.map((it) => `${it.quantity}x ${it.itemName}`).join(", ")}
+                  </p>
+                  <p className="text-[9px] text-neutral-600">
+                    {new Date(ord.createdAt).toLocaleDateString()} {new Date(ord.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  </p>
+                </div>
+              ))
+            ) : (
+              <p className="text-[11px] text-neutral-500 text-center py-2 bg-neutral-950/60 rounded-lg border border-neutral-800">
+                No previous orders recorded.
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* Direct Actions */}
+        <div className="space-y-2 pt-2 border-t border-neutral-800">
+          <p className="font-bold uppercase tracking-wider text-neutral-400 text-[10px]">
+            Direct Actions
+          </p>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              window.open(`https://wa.me/${selectedConv.customerPhone.replace(/\+/g, "")}`, "_blank");
+            }}
+            className="w-full text-xs justify-start border-neutral-800 bg-neutral-950 text-neutral-200 hover:bg-neutral-800"
+          >
+            <ExternalLink className="size-3.5 mr-2 text-emerald-400" />
+            Open in WhatsApp App
+          </Button>
+
+          {isOwnerUser && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setShowDeleteCustomerModal(true)}
+              className="w-full text-xs justify-start border-red-500/40 bg-red-950/20 text-red-400 hover:bg-red-900/40 hover:text-red-200"
+              title="Permanently remove customer profile and all history (Owner Only)"
+            >
+              <Trash2 className="size-3.5 mr-2 text-red-400" />
+              Delete Customer & History
+            </Button>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="h-[calc(100vh-6.5rem)] flex flex-col space-y-3">
@@ -302,6 +623,18 @@ export default function ConversationsInboxPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {/* Responsive Profile Toggle for small/medium screens */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowProfileDrawer(!showProfileDrawer)}
+            className={`xl:hidden text-xs h-8 border-neutral-800 ${
+              showProfileDrawer ? "bg-amber-500/20 text-amber-400" : "bg-neutral-900 text-neutral-300"
+            }`}
+          >
+            <Info className="size-3.5 mr-1 text-amber-500" />
+            Profile
+          </Button>
           <Button
             variant="outline"
             size="sm"
@@ -330,7 +663,7 @@ export default function ConversationsInboxPage() {
       </div>
 
       {/* 3-Pane Full-Width Resilient Flexbox Layout */}
-      <div className="flex-1 flex flex-col md:flex-row gap-3 min-h-0 min-h-[calc(100vh-120px)] overflow-hidden">
+      <div className="flex-1 flex flex-col md:flex-row gap-3 min-h-0 min-h-[calc(100vh-120px)] overflow-hidden relative">
         {/* LEFT PANE: Fixed Width Sidebar (w-80 / 320px) */}
         <Card className="w-full md:w-80 shrink-0 bg-neutral-900/80 border-neutral-800 flex flex-col h-full min-h-0 overflow-hidden">
           <CardHeader className="p-3 border-b border-neutral-800 space-y-2.5 shrink-0">
@@ -446,56 +779,91 @@ export default function ConversationsInboxPage() {
         <Card className="flex-1 min-w-0 h-full min-h-0 bg-neutral-900/90 border-neutral-800 flex flex-col overflow-hidden">
           {selectedConv ? (
             <>
-              {/* Chat Header with Real-Time Takeover State */}
-              <div className="p-3 border-b border-neutral-800 flex items-center justify-between bg-neutral-950/40 shrink-0">
-                <div className="flex items-center gap-2.5 min-w-0">
+              {/* Chat Header with Real-Time Takeover State & Owner-Only Delete Action */}
+              <div className="px-4 py-3 border-b border-neutral-800 flex items-center justify-between gap-4 bg-neutral-950/60 shrink-0 min-h-[64px]">
+                {/* Left Section: Customer name, phone number, and WhatsApp icon/badge */}
+                <div className="flex items-center gap-3 min-w-0">
                   <div
-                    className={`size-9 rounded-xl border flex items-center justify-center font-bold text-xs shrink-0 ${
+                    className={`size-10 rounded-xl border flex items-center justify-center font-bold text-xs shrink-0 shadow-sm ${
                       selectedConv.status === "PENDING"
-                        ? "bg-red-500/20 text-red-400 border-red-500/40"
-                        : "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                        ? "bg-red-500/20 text-red-400 border-red-500/40 shadow-red-950/40"
+                        : "bg-emerald-500/15 text-emerald-400 border-emerald-500/30 shadow-emerald-950/40"
                     }`}
                   >
-                    {selectedConv.status === "PENDING" ? <Headphones className="size-4" /> : "WA"}
+                    {selectedConv.status === "PENDING" ? <Headphones className="size-5" /> : "WA"}
                   </div>
                   <div className="min-w-0">
-                    <h3 className="text-xs font-bold text-white flex items-center gap-2 truncate">
-                      <span>{selectedConv.customerName || selectedConv.customerPhone}</span>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="text-sm font-bold text-white truncate">
+                        {selectedConv.customerName || selectedConv.customerPhone}
+                      </h3>
                       {selectedConv.status === "PENDING" ? (
-                        <span className="text-[9px] px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/40 font-black animate-pulse uppercase">
+                        <span className="text-[9px] px-2 py-0.5 rounded-full bg-red-500/20 text-red-400 border border-red-500/40 font-black animate-pulse uppercase">
                           👤 HUMAN TAKEOVER ACTIVE
                         </span>
                       ) : (
-                        <span className="text-[9px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 font-bold uppercase">
-                          🤖 AI ASSISTANT RUNNING
+                        <span className="text-[9px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 font-bold uppercase">
+                          🤖 AI RUNNING
                         </span>
                       )}
-                    </h3>
-                    <p className="text-[10px] text-neutral-400 font-mono truncate">{selectedConv.customerPhone}</p>
+                    </div>
+                    <p className="text-[11px] text-neutral-400 font-mono truncate mt-0.5">
+                      {selectedConv.customerPhone}
+                    </p>
                   </div>
                 </div>
 
-                {/* Handoff Toggle Button */}
-                <div className="flex items-center gap-2 shrink-0">
+                {/* Right Section: Action buttons container with clear padding and margins */}
+                <div className="flex items-center justify-end gap-3 flex-wrap shrink-0">
+                  {/* 1-Click Staff Busy Quick Action Button */}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleSendStaffBusy}
+                    disabled={sendingBusy}
+                    className="h-8 px-3 text-xs bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border-amber-500/30 font-semibold transition shrink-0"
+                    title="Send instant 'Staff Busy' notice to customer"
+                  >
+                    <Clock className="size-3.5 mr-1.5 text-amber-400 shrink-0" />
+                    <span>⏳ Staff Busy</span>
+                  </Button>
+
+                  {/* Takeover Toggle Button */}
                   {selectedConv.status === "PENDING" ? (
                     <Button
                       size="sm"
                       onClick={() => handleToggleTakeover("OPEN")}
                       disabled={togglingStatus}
-                      className="h-8 text-[11px] bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-500/40 font-bold shadow-md shadow-emerald-950/50"
+                      className="h-8 px-3 text-xs bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-500/40 font-bold shadow-md shadow-emerald-950/50 transition shrink-0"
+                      title="Resume AI Bot & Send Main Interactive Menu to Customer"
                     >
-                      <Bot className="size-3.5 mr-1.5" />
-                      RESUME AI
+                      <Bot className="size-3.5 mr-1.5 shrink-0" />
+                      <span>Resume to AI</span>
                     </Button>
                   ) : (
                     <Button
                       size="sm"
                       onClick={() => handleToggleTakeover("PENDING")}
                       disabled={togglingStatus}
-                      className="h-8 text-[11px] bg-amber-500 hover:bg-amber-600 text-neutral-950 border border-amber-400/40 font-bold shadow-md shadow-amber-950/50"
+                      className="h-8 px-3 text-xs bg-amber-500 hover:bg-amber-600 text-neutral-950 border border-amber-400/40 font-bold shadow-md shadow-amber-950/50 transition shrink-0"
+                      title="Switch to Manual Human Agent Support"
                     >
-                      <UserCheck className="size-3.5 mr-1.5" />
-                      TAKE OVER CHAT
+                      <UserCheck className="size-3.5 mr-1.5 shrink-0" />
+                      <span>Take Over Chat</span>
+                    </Button>
+                  )}
+
+                  {/* Owner-Only Delete Conversation Button */}
+                  {isOwnerUser && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setShowDeleteModal(true)}
+                      className="h-8 px-3 text-xs border-red-500/40 bg-red-950/30 text-red-400 hover:bg-red-900/50 hover:text-red-200 font-semibold transition shrink-0"
+                      title="Delete Conversation (Owner Only)"
+                    >
+                      <Trash2 className="size-3.5 mr-1.5 text-red-400 shrink-0" />
+                      <span>Delete Chat</span>
                     </Button>
                   )}
                 </div>
@@ -566,6 +934,16 @@ export default function ConversationsInboxPage() {
               <div className="px-3 pt-2 pb-1 border-t border-neutral-800 bg-neutral-950/40 flex items-center gap-1.5 overflow-x-auto scroll-slim shrink-0">
                 <button
                   type="button"
+                  onClick={handleSendStaffBusy}
+                  disabled={sendingBusy}
+                  className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/40 hover:bg-amber-500/30 whitespace-nowrap transition flex items-center gap-1 shrink-0"
+                  title="Immediately send staff busy message to customer"
+                >
+                  <Clock className="size-3" />
+                  ⏳ Staff Busy
+                </button>
+                <button
+                  type="button"
                   onClick={() => handleQuickReply("Assalam-o-Alaikum! Main A-ONE Restaurant team se baat kar raha hoon. Main aap ki kya madad kar sakta hoon?")}
                   className="px-2.5 py-1 rounded-lg text-[10px] font-semibold bg-neutral-800 text-neutral-300 hover:bg-neutral-700 whitespace-nowrap transition"
                 >
@@ -623,7 +1001,7 @@ export default function ConversationsInboxPage() {
           )}
         </Card>
 
-        {/* RIGHT PANE: Customer Context & Real Order History (w-80 / 320px) */}
+        {/* RIGHT PANE: Customer Context & Real Order History (Desktop w-80 / 320px) */}
         <Card className="hidden xl:flex w-80 shrink-0 bg-neutral-900/80 border-neutral-800 flex-col h-full min-h-0 overflow-hidden">
           <CardHeader className="p-3.5 border-b border-neutral-800 shrink-0">
             <CardTitle className="text-xs font-bold text-white flex items-center gap-1.5">
@@ -631,115 +1009,128 @@ export default function ConversationsInboxPage() {
               Customer Profile & History
             </CardTitle>
           </CardHeader>
-          <CardContent className="p-3.5 space-y-4 flex-1 overflow-y-auto scroll-slim text-xs">
-            {selectedConv ? (
-              <>
-                {/* Profile Card */}
-                <div className="p-3 rounded-xl bg-neutral-950 border border-neutral-800 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <p className="font-bold text-sm text-white">
-                      {selectedConv.customerName || "Customer (WhatsApp)"}
-                    </p>
-                    <span
-                      className={`text-[9px] font-bold px-1.5 py-0.5 rounded border uppercase tracking-wider ${
-                        selectedConv.status === "PENDING"
-                          ? "bg-red-500/20 text-red-400 border-red-500/40 animate-pulse font-extrabold"
-                          : "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
-                      }`}
-                    >
-                      {selectedConv.status === "PENDING" ? "Human Handling" : "AI Active"}
-                    </span>
-                  </div>
-                  <p className="flex items-center gap-1.5 text-neutral-400 font-mono text-[11px]">
-                    <Phone className="size-3 text-amber-500" />
-                    {selectedConv.customerPhone}
-                  </p>
-                  {selectedConv.customerAddress && (
-                    <p className="flex items-start gap-1.5 text-neutral-400 text-[11px]">
-                      <MapPin className="size-3 text-amber-500 shrink-0 mt-0.5" />
-                      <span>{selectedConv.customerAddress}</span>
-                    </p>
-                  )}
-                  {selectedConv.customerNotes && (
-                    <p className="text-[11px] text-amber-300 bg-amber-500/10 p-2 rounded-lg mt-1">
-                      Note: {selectedConv.customerNotes}
-                    </p>
-                  )}
-                </div>
-
-                {/* Customer Orders History */}
-                <div className="space-y-2">
-                  <p className="font-bold uppercase tracking-wider text-neutral-400 text-[10px] flex items-center justify-between">
-                    <span>Recent Orders</span>
-                    <span>{selectedConv.recentOrders?.length || 0} total</span>
-                  </p>
-
-                  <div className="space-y-2">
-                    {selectedConv.recentOrders && selectedConv.recentOrders.length > 0 ? (
-                      selectedConv.recentOrders.map((ord, ordIdx) => (
-                        <div
-                          key={ord.id ? `${ord.id}-${ordIdx}` : `ord-${ordIdx}`}
-                          className="p-2.5 rounded-xl bg-neutral-950 border border-neutral-800 space-y-1.5"
-                        >
-                          <div className="flex items-center justify-between">
-                            <span className="font-mono font-bold text-amber-400 text-[11px]">
-                              {ord.orderNumber}
-                            </span>
-                            <span className="text-[10px] font-bold text-white">
-                              Rs. {ord.total?.toLocaleString()}
-                            </span>
-                          </div>
-                          <div className="flex items-center justify-between text-[10px]">
-                            <span className="text-neutral-400">{ord.status}</span>
-                            <span
-                              className={`px-1.5 py-0.5 rounded font-semibold text-[9px] uppercase ${
-                                ord.paymentStatus === "PAID"
-                                  ? "bg-emerald-500/15 text-emerald-400"
-                                  : ord.paymentStatus === "PENDING_VERIFICATION"
-                                  ? "bg-amber-500/20 text-amber-400"
-                                  : "bg-neutral-800 text-neutral-400"
-                              }`}
-                            >
-                              {ord.paymentStatus}
-                            </span>
-                          </div>
-                          <p className="text-[10px] text-neutral-500 truncate">
-                            {ord.items?.map((it) => `${it.quantity}x ${it.itemName}`).join(", ")}
-                          </p>
-                        </div>
-                      ))
-                    ) : (
-                      <p className="text-[11px] text-neutral-500 text-center py-2">
-                        No previous orders recorded.
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                {/* Direct Actions */}
-                <div className="space-y-2 pt-2 border-t border-neutral-800">
-                  <p className="font-bold uppercase tracking-wider text-neutral-400 text-[10px]">
-                    Direct Actions
-                  </p>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      window.open(`https://wa.me/${selectedConv.customerPhone.replace(/\+/g, "")}`, "_blank");
-                    }}
-                    className="w-full text-xs justify-start border-neutral-800 bg-neutral-950 text-neutral-200 hover:bg-neutral-800"
-                  >
-                    <ExternalLink className="size-3.5 mr-2 text-emerald-400" />
-                    Open in WhatsApp App
-                  </Button>
-                </div>
-              </>
-            ) : (
-              <p className="text-neutral-500 text-center py-8">No customer selected.</p>
-            )}
+          <CardContent className="p-3.5 flex-1 overflow-y-auto scroll-slim">
+            {renderProfileContent()}
           </CardContent>
         </Card>
+
+        {/* Responsive Mobile / Tablet Profile Slide-over Drawer */}
+        {showProfileDrawer && (
+          <div className="xl:hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex justify-end">
+            <div className="w-full max-w-sm h-full bg-neutral-900 border-l border-neutral-800 p-4 flex flex-col overflow-hidden animate-in slide-in-from-right duration-200">
+              <div className="flex items-center justify-between pb-3 border-b border-neutral-800 shrink-0">
+                <h3 className="text-xs font-bold text-white flex items-center gap-2">
+                  <User className="size-4 text-amber-500" />
+                  Customer Profile & History
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setShowProfileDrawer(false)}
+                  className="p-1 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800"
+                >
+                  <X className="size-4" />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto pt-3 scroll-slim">
+                {renderProfileContent()}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* Owner-Only Delete Confirmation Modal */}
+      {showDeleteModal && selectedConv && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-neutral-900 border border-neutral-800 rounded-2xl max-w-md w-full p-5 space-y-4 shadow-2xl animate-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-3 text-red-400">
+              <div className="p-2.5 rounded-xl bg-red-500/20 border border-red-500/30">
+                <Trash2 className="size-5 text-red-400" />
+              </div>
+              <div>
+                <h3 className="text-sm font-black text-white">Permanently Delete Conversation?</h3>
+                <p className="text-xs text-neutral-400 mt-0.5">Owner-Only Purge Action</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-neutral-300 leading-relaxed bg-neutral-950 p-3 rounded-xl border border-neutral-800">
+              Are you sure you want to permanently delete the entire chat history for{" "}
+              <strong className="text-white">{selectedConv.customerName || selectedConv.customerPhone}</strong>?
+              All message records will be purged from the database. Customer order history will remain preserved.
+            </p>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowDeleteModal(false)}
+                disabled={deletingConv}
+                className="border-neutral-800 bg-neutral-950 text-neutral-300 hover:bg-neutral-800 text-xs h-9"
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleDeleteConversation}
+                disabled={deletingConv}
+                className="bg-red-600 hover:bg-red-700 text-white font-bold text-xs h-9 px-4 shadow-lg shadow-red-950/50"
+              >
+                {deletingConv ? "Purging..." : "Confirm & Delete"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Owner-Only Delete Customer & History Confirmation Modal */}
+      {showDeleteCustomerModal && selectedConv && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-neutral-900 border border-red-500/40 rounded-2xl max-w-md w-full p-5 space-y-4 shadow-2xl animate-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-3 text-red-400">
+              <div className="p-2.5 rounded-xl bg-red-500/20 border border-red-500/30">
+                <AlertTriangle className="size-5 text-red-400" />
+              </div>
+              <div>
+                <h3 className="text-sm font-black text-white">Delete Customer & Complete History</h3>
+                <p className="text-xs text-neutral-400 mt-0.5">Owner Authorization Required</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-neutral-300 leading-relaxed bg-neutral-950 p-3 rounded-xl border border-neutral-800">
+              Are you sure? This will remove the customer profile and all chat history for all staff members.
+            </p>
+
+            <div className="p-3 rounded-lg bg-neutral-950 border border-neutral-800 space-y-1 font-mono text-[11px]">
+              <p className="text-white font-bold">{selectedConv.customerName || "Customer"}</p>
+              <p className="text-amber-400">{selectedConv.customerPhone}</p>
+            </div>
+
+            <p className="text-red-400 text-[11px] font-semibold">
+              ⚠️ This permanently deletes the customer profile, order records, and conversation history.
+            </p>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowDeleteCustomerModal(false)}
+                disabled={deletingCustomer}
+                className="border-neutral-800 bg-neutral-950 text-neutral-300 hover:bg-neutral-800 text-xs h-9"
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleDeleteCustomerAndHistory}
+                disabled={deletingCustomer}
+                className="bg-red-600 hover:bg-red-700 text-white font-bold text-xs h-9 px-4 shadow-lg shadow-red-950/50"
+              >
+                {deletingCustomer ? "Purging..." : "Confirm & Delete Customer"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,460 +1,470 @@
 import { NextResponse } from "next/server";
 import axios from "axios";
-import { prisma } from "@/lib/db";
+import { getRestaurantSettings } from "@/lib/settings-store";
+import { getWhatsAppCredentials } from "@/lib/whatsapp/client";
+import { MENU_CATEGORIES_LIST, MENU_DATA, findItemById } from "@/lib/whatsapp/menu-catalog";
+import { generateMultiProviderReply } from "@/lib/ai/multi-provider";
 
-const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
-const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
-const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
-
-// In-Memory Multi-User Session Store with Human Handoff & Auto-Timeout Support
+// Multi-User Session Map (Track each customer phone number separately)
 const userSessions = new Map();
-const HUMAN_TIMEOUT_MS = 15 * 60 * 1000; // 15 Minutes auto-resume timeout
 
-function getUserSession(phone) {
+function getSession(phone) {
   if (!userSessions.has(phone)) {
     userSessions.set(phone, {
+      language: "ROMAN_URDU",
       step: "IDLE",
-      status: "AI_ACTIVE",
-      aiActive: true,
-      unreadAlert: false,
-      humanRequestedAt: null,
       selectedItem: null,
+      selectedItemDetails: null,
       quantity: null,
       address: null,
-      lastInteractionAt: Date.now(),
+      cart: [],
     });
   }
-  const session = userSessions.get(phone);
-
-  // Check automated AI Resume timeout (15 minutes inactivity in HUMAN_REQUESTED state)
-  if (!session.aiActive && session.humanRequestedAt) {
-    if (Date.now() - session.humanRequestedAt > HUMAN_TIMEOUT_MS) {
-      session.aiActive = true;
-      session.status = "AI_ACTIVE";
-      session.unreadAlert = false;
-      session.humanRequestedAt = null;
-      session.step = "IDLE";
-
-      // Best-effort DB update
-      prisma.customer.findUnique({ where: { phone } }).then((cust) => {
-        if (cust) {
-          prisma.conversation.updateMany({
-            where: { customerId: cust.id, status: "PENDING" },
-            data: { status: "OPEN" },
-          }).catch(() => {});
-        }
-      }).catch(() => {});
-    }
-  }
-
-  session.lastInteractionAt = Date.now();
-  return session;
+  return userSessions.get(phone);
 }
 
-function resetUserSession(phone) {
-  const existing = userSessions.get(phone);
+function resetSession(phone) {
+  const current = getSession(phone);
   userSessions.set(phone, {
+    language: current.language || "ROMAN_URDU",
     step: "IDLE",
-    status: "AI_ACTIVE",
-    aiActive: true,
-    unreadAlert: false,
-    humanRequestedAt: null,
     selectedItem: null,
+    selectedItemDetails: null,
     quantity: null,
     address: null,
-    lastInteractionAt: Date.now(),
+    cart: [],
   });
 }
 
-// Hardcoded Menu
-const MENU_DATA = {
-  cat_pizza: {
-    title: "Pizzas",
-    rows: [
-      { id: "pz_reg_s", title: "Regular Pizza (Small)", description: "Rs. 440 (Tikka, Fajita, Supreme)" },
-      { id: "pz_reg_m", title: "Regular Pizza (Medium)", description: "Rs. 900 (Tikka, Fajita, Supreme)" },
-      { id: "pz_reg_l", title: "Regular Pizza (Large)", description: "Rs. 1300 (Tikka, Fajita, Supreme)" },
-      { id: "pz_reg_xl", title: "Regular Pizza (XL)", description: "Rs. 1900 (Tikka, Fajita, Supreme)" },
-      { id: "pz_sp_m", title: "Special A-One (Medium)", description: "Rs. 1000 (Malai Boti, BBQ, Achari)" },
-      { id: "pz_sp_l", title: "Special A-One (Large)", description: "Rs. 1450 (Malai Boti, BBQ, Achari)" },
-      { id: "pz_crust_l", title: "Special Crust (Large)", description: "Rs. 1200 (Kabab / Cheese Stuffer)" },
-    ],
-  },
-  cat_deals: {
-    title: "Special Deals",
-    rows: [
-      { id: "deal_1", title: "Deal 1 - Rs. 580", description: "1 Small Pizza + 350ml Drink" },
-      { id: "deal_2", title: "Deal 2 - Rs. 500", description: "1 Patty Burger + 1 Sm Fries + 350ml Drink" },
-      { id: "deal_3", title: "Deal 3 - Rs. 810", description: "2 Zinger Burgers + 2 Drinks 350ml" },
-      { id: "deal_4", title: "Deal 4 - Rs. 1150", description: "2 Zinger Burgers + 2 Fries + 2 Drinks" },
-      { id: "deal_5", title: "Deal 5 - Rs. 750", description: "1 Zinger + 1 Patty + 1 Fries + 2 Drinks" },
-      { id: "deal_6", title: "Deal 6 - Rs. 1700", description: "1 Large Pizza + 1 Med Pizza + 1.5L Drink" },
-      { id: "deal_7", title: "Deal 7 - Rs. 2650", description: "2 Large Pizzas + 1.5L Drink" },
-      { id: "deal_8", title: "Deal 8 - Rs. 480", description: "1 Small Pizza + 1 Zinger + 350ml Drink" },
-    ],
-  },
-  cat_burgers: {
-    title: "Broast & Burgers",
-    rows: [
-      { id: "br_q", title: "Quarter Broast - Rs. 700", description: "Crispy fried chicken broast" },
-      { id: "br_h", title: "Half Broast - Rs. 1200", description: "Crispy fried chicken broast" },
-      { id: "bg_z", title: "Zinger Burger - Rs. 370", description: "Crispy fried chicken fillet" },
-      { id: "bg_m", title: "Mighty Zinger - Rs. 430", description: "Double zinger patty loaded" },
-      { id: "bg_s", title: "Steaker Burger - Rs. 530", description: "Chef special beef/chicken burger" },
-      { id: "wp_z", title: "Zinger Wrap - Rs. 420", description: "Tortilla roll with zinger chunks" },
-    ],
-  },
-  cat_shawarma: {
-    title: "Shawarma & Parathas",
-    rows: [
-      { id: "sh_chk", title: "Chicken Shawarma - Rs. 200", description: "Fresh rolled chicken shawarma" },
-      { id: "sh_zng", title: "Zinger Shawarma - Rs. 280", description: "Crispy zinger wrapped with mayo" },
-      { id: "pr_kbb", title: "Kabab Paratha - Rs. 320", description: "Grilled kabab in crispy paratha" },
-      { id: "pr_mli", title: "Malai Boti Paratha - Rs. 360", description: "Creamy boti in hot paratha" },
-      { id: "pr_zng", title: "Zinger Paratha - Rs. 300", description: "Crispy chicken paratha roll" },
-    ],
-  },
-  cat_pasta: {
-    title: "Pasta & Fries",
-    rows: [
-      { id: "pa_sp_s", title: "Special Pasta (S) - Rs. 430", description: "Cheese baked creamy pasta" },
-      { id: "pa_sp_l", title: "Special Pasta (L) - Rs. 720", description: "Large baked cheese pasta" },
-      { id: "fr_load", title: "Loaded Fries - Rs. 620", description: "Fries with cheese & crispy bites" },
-      { id: "fr_pzz", title: "Pizza Fries - Rs. 600", description: "Fries with melted pizza toppings" },
-    ],
-  },
-  cat_rice: {
-    title: "Rice & Traditional",
-    rows: [
-      { id: "rc_chk_b", title: "Chicken Biryani - Rs. 380", description: "Fresh hot chicken biryani" },
-      { id: "rc_sp_b", title: "Special Biryani - Rs. 440", description: "Double chicken loaded biryani" },
-      { id: "rc_chk_p", title: "Chicken Pulao - Rs. 380", description: "Aroma rice with spiced chicken" },
-      { id: "rc_bf_p", title: "Beef Pulao - Rs. 430", description: "Traditional seasoned beef pulao" },
-    ],
-  },
-  cat_family: {
-    title: "Family & Summer Deals",
-    rows: [
-      { id: "fam_1", title: "Family Deal 1 - Rs. 3180", description: "2 Large Pizza + Fries + Broast + 1.5L Drink" },
-      { id: "fam_2", title: "Family Deal 2 - Rs. 3000", description: "2 Large Pizzas + 1.5L Drink" },
-      { id: "sum_2", title: "Summer Deal 2 - Rs. 1900", description: "4 Zingers + 2 Brownies + 1.5L Drink" },
-      { id: "sum_4", title: "Summer Deal 4 - Rs. 690", description: "2 Chicken Burgers + 1 Sm Fries + 1 Drink" },
-    ],
-  },
-};
-
-async function sendToWhatsApp(to, data) {
+async function sendWhatsApp(to, data) {
   try {
-    const formattedTo = to.replace(/[^0-9]/g, "");
+    const creds = await getWhatsAppCredentials();
+    if (!creds.phoneId || !creds.token) {
+      console.warn("[webhook route] WHATSAPP_TOKEN or PHONE_NUMBER_ID not configured.");
+      return;
+    }
     await axios.post(
-      `https://graph.facebook.com/v18.0/${PHONE_NUMBER_ID}/messages`,
-      { messaging_product: "whatsapp", to: formattedTo, ...data },
-      { headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` } }
+      `https://graph.facebook.com/${creds.apiVersion || "v21.0"}/${creds.phoneId}/messages`,
+      { messaging_product: "whatsapp", to, ...data },
+      { headers: { Authorization: `Bearer ${creds.token}` } }
     );
   } catch (err) {
-    console.error("WhatsApp Error:", err.response?.data || err.message);
+    console.error("WhatsApp Send Error:", err.response?.data || err.message);
   }
 }
 
-// Persist message to database for real-time Staff Operations Inbox
-async function persistDbMessage(phone, senderName, role, content, statusOverride) {
-  try {
-    const formattedPhone = phone.startsWith("+") ? phone : `+${phone}`;
-    let customer = await prisma.customer.findUnique({ where: { phone: formattedPhone } });
-    if (!customer) {
-      customer = await prisma.customer.create({
-        data: {
-          phone: formattedPhone,
-          name: senderName || "WhatsApp Customer",
-        },
-      });
-    }
+// =============================================================================
+//  DETERMINISTIC FLOWS (100% NATIVE WHATSAPP - NO GEMINI)
+// =============================================================================
 
-    let conversation = await prisma.conversation.findFirst({
-      where: { customerId: customer.id },
-      orderBy: { createdAt: "desc" },
-    });
+// Flow 1: Greeting & Language Trigger
+async function sendLanguageSelection(to) {
+  const bodyText =
+    "Assalam-o-Alaikum! A-One Foods mein khushamdeed.\nApni zaban muntakhib karein / Select Language:";
 
-    const convStatus = statusOverride || (role === "USER" ? undefined : "OPEN");
-
-    if (!conversation) {
-      conversation = await prisma.conversation.create({
-        data: {
-          customerId: customer.id,
-          channel: "WHATSAPP",
-          status: convStatus || "OPEN",
-          unreadCount: role === "USER" ? 1 : 0,
-          lastMessageAt: new Date(),
-        },
-      });
-    } else {
-      await prisma.conversation.update({
-        where: { id: conversation.id },
-        data: {
-          lastMessageAt: new Date(),
-          status: convStatus !== undefined ? convStatus : conversation.status,
-          unreadCount: role === "USER" ? conversation.unreadCount + 1 : 0,
-        },
-      });
-    }
-
-    await prisma.message.create({
-      data: {
-        conversationId: conversation.id,
-        role: role === "USER" ? "USER" : "ASSISTANT",
-        content,
-        messageType: "TEXT",
-        status: "DELIVERED",
+  await sendWhatsApp(to, {
+    type: "interactive",
+    interactive: {
+      type: "button",
+      body: { text: bodyText },
+      action: {
+        buttons: [
+          { type: "reply", reply: { id: "set_lang_roman", title: "🇵🇰 Roman Urdu" } },
+          { type: "reply", reply: { id: "set_lang_urdu", title: "🇵🇰 اردو" } },
+          { type: "reply", reply: { id: "set_lang_en", title: "🇬🇧 English" } },
+        ],
       },
-    });
-
-    return conversation;
-  } catch (e) {
-    console.warn("[persistDbMessage] best-effort DB notice:", e?.message);
-    return null;
-  }
+    },
+  });
 }
 
+// Flow 2: Main Menu Buttons (Based on locked user language)
+async function sendMainMenuButtons(to, language = "ROMAN_URDU") {
+  let bodyText =
+    "Aapki khidmat ke liye hazir hain. Khana dekhne ke liye neeche button par tap karein:";
+  let btnMenuTitle = "📜 View Menu";
+  let btnDealsTitle = "🔥 Special Deals";
+  let btnStaffTitle = "👨‍🍳 Staff Support";
+
+  if (language === "URDU") {
+    bodyText =
+      "اے ون فوڈز میں خوش آمدید! کھانا دیکھنے کے لیے نیچے دیے گئے بٹن پر ٹیپ کریں:";
+    btnMenuTitle = "📜 مینو دیکھیں";
+    btnDealsTitle = "🔥 اسپیشل ڈیلز";
+    btnStaffTitle = "👨‍🍳 عملے سے رابطہ";
+  } else if (language === "ENGLISH") {
+    bodyText =
+      "Welcome to A-One Foods! Please tap a button below to view our menu and deals:";
+    btnMenuTitle = "📜 View Menu";
+    btnDealsTitle = "🔥 Special Deals";
+    btnStaffTitle = "👨‍🍳 Staff Support";
+  }
+
+  await sendWhatsApp(to, {
+    type: "interactive",
+    interactive: {
+      type: "button",
+      body: { text: bodyText },
+      action: {
+        buttons: [
+          { type: "reply", reply: { id: "btn_show_menu", title: btnMenuTitle.slice(0, 20) } },
+          { type: "reply", reply: { id: "btn_show_deals", title: btnDealsTitle.slice(0, 20) } },
+          { type: "reply", reply: { id: "btn_staff_help", title: btnStaffTitle.slice(0, 20) } },
+        ],
+      },
+    },
+  });
+}
+
+// Flow 3: Drawer/Folder Style Category List (WhatsApp type: "list")
+async function sendCategoriesList(to, language = "ROMAN_URDU") {
+  let headerText = "A-One Foods Menu";
+  let bodyText = "Categories dekhne ke liye neeche button par tap karein:";
+  let buttonTitle = "Categories";
+
+  if (language === "URDU") {
+    headerText = "اے ون فوڈز مینو";
+    bodyText = "مینو کیٹیگریز دیکھنے کے لیے نیچے بٹن دبائیں:";
+    buttonTitle = "کیٹیگریز";
+  } else if (language === "ENGLISH") {
+    headerText = "A-One Foods Menu";
+    bodyText = "Tap the button below to browse categories:";
+    buttonTitle = "Categories";
+  }
+
+  await sendWhatsApp(to, {
+    type: "interactive",
+    interactive: {
+      type: "list",
+      header: { type: "text", text: headerText },
+      body: { text: bodyText },
+      footer: { text: "A-One Foods Delivery" },
+      action: {
+        button: buttonTitle.slice(0, 20),
+        sections: [
+          {
+            title: "Menu Categories",
+            rows: MENU_CATEGORIES_LIST,
+          },
+        ],
+      },
+    },
+  });
+}
+
+// Flow 4: Items List Popup (WhatsApp type: "list")
+async function sendCategoryItemsList(to, catKey, language = "ROMAN_URDU") {
+  const cat = MENU_DATA[catKey] || MENU_DATA.cat_special_deals;
+  if (!cat) {
+    await sendCategoriesList(to, language);
+    return;
+  }
+
+  let bodyText = "Apna manpasand item select karein:";
+  let buttonTitle = "Items List";
+
+  if (language === "URDU") {
+    bodyText = "اپنا پسندیدہ آئٹم منتخب کریں:";
+    buttonTitle = "آئٹمز لسٹ";
+  } else if (language === "ENGLISH") {
+    bodyText = "Please select your favorite item:";
+    buttonTitle = "Items List";
+  }
+
+  await sendWhatsApp(to, {
+    type: "interactive",
+    interactive: {
+      type: "list",
+      header: { type: "text", text: cat.title.substring(0, 60) },
+      body: { text: bodyText },
+      action: {
+        button: buttonTitle.slice(0, 20),
+        sections: [
+          {
+            title: cat.title.substring(0, 24),
+            rows: cat.rows.slice(0, 10),
+          },
+        ],
+      },
+    },
+  });
+}
+
+// Flow 5: 1-Tap Item Confirmation Buttons
+async function sendItemConfirmation(to, item, language = "ROMAN_URDU") {
+  let bodyText = `Aapne select kiya: *${item.title}*\n${item.description}\n\nKya yehi finalize karna hai?`;
+  let btnConfirm = "✅ Order Now";
+  let btnMore = "➕ Aur Dekhein";
+  let btnLang = "🌐 Zaban Badlein";
+
+  if (language === "URDU") {
+    bodyText = `آپ کا انتخاب: *${item.title}*\n${item.description}\n\nکیا آپ یہ آرڈر فائنل کرنا چاہتے ہیں؟`;
+    btnConfirm = "✅ آرڈر کریں";
+    btnMore = "➕ مزید دیکھیں";
+    btnLang = "🌐 زبان تبدیل کریں";
+  } else if (language === "ENGLISH") {
+    bodyText = `You selected: *${item.title}*\n${item.description}\n\nWould you like to confirm this order?`;
+    btnConfirm = "✅ Order Now";
+    btnMore = "➕ View More";
+    btnLang = "🌐 Change Lang";
+  }
+
+  await sendWhatsApp(to, {
+    type: "interactive",
+    interactive: {
+      type: "button",
+      body: { text: bodyText },
+      action: {
+        buttons: [
+          { type: "reply", reply: { id: "btn_confirm_order", title: btnConfirm.slice(0, 20) } },
+          { type: "reply", reply: { id: "btn_show_menu", title: btnMore.slice(0, 20) } },
+          { type: "reply", reply: { id: "btn_change_lang", title: btnLang.slice(0, 20) } },
+        ],
+      },
+    },
+  });
+}
+
+// Meta Webhook Verification
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const mode = searchParams.get("hub.mode");
   const token = searchParams.get("hub.verify_token");
   const challenge = searchParams.get("hub.challenge");
 
-  if (mode === "subscribe" && token === (VERIFY_TOKEN || "aone_webhook_secret_token")) {
+  const creds = await getWhatsAppCredentials();
+  const validToken = creds.verifyToken || process.env.VERIFY_TOKEN;
+
+  if (mode === "subscribe" && token === validToken) {
     return new Response(challenge, { status: 200 });
   }
   return new Response("Forbidden", { status: 403 });
 }
 
+// Incoming Messages Handler
 export async function POST(request) {
   try {
     const body = await request.json();
     const entry = body?.entry?.[0]?.changes?.[0]?.value;
     const message = entry?.messages?.[0];
-    const contact = entry?.contacts?.[0];
-    const profileName = contact?.profile?.name;
+
+    console.log(">>> [ACTIVE WEBHOOK HIT: /api/webhook] Received incoming message:", JSON.stringify(message, null, 2));
 
     if (!message) return NextResponse.json({ status: "ignored" });
     const from = message.from;
-    const session = getUserSession(from);
+    const session = getSession(from);
 
-    // Text Messages Handling
+    // =========================================================================
+    //  1. TEXT INBOUND MESSAGES
+    // =========================================================================
     if (message.type === "text") {
       const text = message.text.body.trim();
       const lower = text.toLowerCase();
 
-      // Log inbound user message in DB for staff inbox
-      await persistDbMessage(from, profileName, "USER", text);
-
-      // Check if user is triggering Staff Support via keywords
-      if (
-        lower.includes("staff") ||
-        lower.includes("human") ||
-        lower.includes("agent") ||
-        lower.includes("representative") ||
-        lower.includes("operator") ||
-        lower.includes("madad") ||
-        lower.includes("help")
-      ) {
-        session.status = "HUMAN_REQUESTED";
-        session.aiActive = false;
-        session.unreadAlert = true;
-        session.humanRequestedAt = Date.now();
-
-        await persistDbMessage(from, profileName, "USER", text, "PENDING");
-
-        const handoffReply = "Aapki request staff ko forward kar di gayi hai. Hamara representative jald hi aapse baat karega.";
-        await sendToWhatsApp(from, {
-          type: "text",
-          text: { body: handoffReply },
-        });
-        await persistDbMessage(from, profileName, "ASSISTANT", handoffReply, "PENDING");
-        return NextResponse.json({ status: "success" });
-      }
-
-      // If customer wants to reset or restart via "menu", "hi", "salam" -> Auto-resume AI
-      if (lower === "hi" || lower === "hello" || lower === "hey" || lower === "menu" || lower.includes("salam") || lower.includes("سلام")) {
-        resetUserSession(from);
-        await persistDbMessage(from, profileName, "USER", text, "OPEN");
-      }
-
-      // If Human Mode is actively handling this customer and not timed out, don't let AI intervene
-      if (!session.aiActive && session.status === "HUMAN_REQUESTED") {
-        await persistDbMessage(from, profileName, "USER", text, "PENDING");
-        return NextResponse.json({ status: "human_handling" });
-      }
-
-      // Check if user is in an active ordering step
-      if (session.step === "AWAITING_QUANTITY") {
-        session.quantity = text;
-        session.step = "AWAITING_ADDRESS";
-        const replyMsg = `Quantity: *${text}* note ho gayi hai.\n\nAb meharbani farma kar apna **Mukammal Delivery Address** likh kar bhej dein:`;
-        await sendToWhatsApp(from, {
-          type: "text",
-          text: { body: replyMsg },
-        });
-        await persistDbMessage(from, profileName, "ASSISTANT", replyMsg);
-        return NextResponse.json({ status: "success" });
+      // Flow: Awaiting Order Details (Quantity & Address)
+      if (session.step === "AWAITING_ORDER_DETAILS" || session.step === "AWAITING_QUANTITY") {
+        if (!session.quantity) {
+          session.quantity = text;
+          session.step = "AWAITING_ADDRESS";
+          await sendWhatsApp(from, {
+            type: "text",
+            text: {
+              body: `Quantity: *${text}* note ho gayi hai.\n\nAb baraye meherbani apna **Delivery Address** bhej dein:`,
+            },
+          });
+          return NextResponse.json({ status: "success" });
+        }
       }
 
       if (session.step === "AWAITING_ADDRESS") {
         session.address = text;
         const summary =
-          `Shukriya! Aapka Order confirm ho chuka hai:\n\n` +
-          `🍽️ Item: *${session.selectedItem}*\n` +
-          `🔢 Quantity: *${session.quantity}*\n` +
+          `✅ *Order Received Successfully!*\n\n` +
+          `🍽️ Item: *${session.selectedItem || "Selected Item"}*\n` +
+          `🔢 Quantity: *${session.quantity || "1"}*\n` +
           `📍 Delivery Address: *${session.address}*\n` +
           `📞 Phone: *${from}*\n\n` +
-          `Hamari team jald hi aap se contact karegi. JazakAllah!`;
+          `A-One Kitchen aapka order prepare kar rahi hai. Shukriya! 🛵`;
 
-        await sendToWhatsApp(from, { type: "text", text: { body: summary } });
-        await persistDbMessage(from, profileName, "ASSISTANT", summary);
-        resetUserSession(from);
+        await sendWhatsApp(from, { type: "text", text: { body: summary } });
+        resetSession(from);
         return NextResponse.json({ status: "success" });
       }
 
-      // Greetings & Common triggers
-      if (lower.includes("salam") || lower.includes("سلام")) {
-        resetUserSession(from);
-        const replyBody = "Walaikum Assalam! Ji main A-One Foods se baat kar raha hoon. Aapki khidmat ke liye hazir hain. Neeche button se menu dekhein:";
-        await sendToWhatsApp(from, {
-          type: "interactive",
-          interactive: {
-            type: "button",
-            body: { text: replyBody },
-            action: {
-              buttons: [
-                { type: "reply", reply: { id: "btn_show_menu", title: "📜 View Menu" } },
-                { type: "reply", reply: { id: "btn_show_deals", title: "🔥 Special Deals" } },
-                { type: "reply", reply: { id: "btn_staff_support", title: "👨‍🍳 Staff Support" } },
-              ],
-            },
-          },
-        });
-        await persistDbMessage(from, profileName, "ASSISTANT", replyBody);
-      } else if (lower === "hi" || lower === "hello" || lower === "hey" || lower === "menu") {
-        resetUserSession(from);
-        const replyBody = "Assalam-o-Alaikum! A-One Foods mein khushamdeed. Main A-One se baat kar raha hoon. Neeche click karke menu check karein:";
-        await sendToWhatsApp(from, {
-          type: "interactive",
-          interactive: {
-            type: "button",
-            body: { text: replyBody },
-            action: {
-              buttons: [
-                { type: "reply", reply: { id: "btn_show_menu", title: "📜 View Menu" } },
-                { type: "reply", reply: { id: "btn_show_deals", title: "🔥 Special Deals" } },
-                { type: "reply", reply: { id: "btn_staff_support", title: "👨‍🍳 Staff Support" } },
-              ],
-            },
-          },
-        });
-        await persistDbMessage(from, profileName, "ASSISTANT", replyBody);
-      } else if (lower.includes("kam") || lower.includes("discount") || lower.includes("riayat") || lower.includes("mehanga")) {
-        const replyBody = "Janab hamari quality aur taza ingredients par koi compromise nahi hota, is liye rates bilkul fixed aur munasib hain. Aap ek baar try karein, inshallah paisa wasool hoga!";
-        await sendToWhatsApp(from, {
-          type: "text",
-          text: { body: replyBody },
-        });
-        await persistDbMessage(from, profileName, "ASSISTANT", replyBody);
-      } else {
-        const replyBody = "Khana order karne ke liye 'Hi' ya 'Menu' likh kar bhejein aur options select karein.";
-        await sendToWhatsApp(from, {
-          type: "text",
-          text: { body: replyBody },
-        });
-        await persistDbMessage(from, profileName, "ASSISTANT", replyBody);
+      // Flow 1 Trigger: Greetings / Language Request
+      if (
+        lower === "hi" ||
+        lower === "hello" ||
+        lower === "hey" ||
+        lower === "start" ||
+        lower === "language" ||
+        lower === "zaban" ||
+        lower === "help" ||
+        lower.includes("salam") ||
+        lower.includes("سلام")
+      ) {
+        resetSession(from);
+        await sendLanguageSelection(from);
+        return NextResponse.json({ status: "success" });
       }
+
+      // Flow 2 / Flow 3 Trigger: Menu Requests
+      if (
+        lower === "menu" ||
+        lower === "m" ||
+        lower === "food" ||
+        lower === "khana" ||
+        lower === "view menu" ||
+        lower === "show menu"
+      ) {
+        resetSession(from);
+        await sendCategoriesList(from, session.language);
+        return NextResponse.json({ status: "success" });
+      }
+
+      // Flow Deals Trigger
+      if (lower === "deals" || lower === "deal" || lower === "special deals" || lower === "offers") {
+        await sendCategoryItemsList(from, "cat_special_deals", session.language);
+        return NextResponse.json({ status: "success" });
+      }
+
+      // Price Bargaining Defense (DETERMINISTIC - NEVER CALL GEMINI)
+      if (
+        lower.includes("kam") ||
+        lower.includes("discount") ||
+        lower.includes("riayat") ||
+        lower.includes("mehanga") ||
+        lower.includes("sasta")
+      ) {
+        await sendWhatsApp(from, {
+          type: "text",
+          text: {
+            body: "Janab hamari quality aur fresh ingredients par koi compromise nahi hota, is liye rates bilkul fixed aur munasib hain. ⭐",
+          },
+        });
+        await sendMainMenuButtons(from, session.language);
+        return NextResponse.json({ status: "success" });
+      }
+
+      // =======================================================================
+      //  CONSTRAINED FALLBACK AI (Gemini 1.5 Pro - General Inquiries Only)
+      // =======================================================================
+      try {
+        const langName =
+          session.language === "URDU"
+            ? "Urdu"
+            : session.language === "ENGLISH"
+            ? "English"
+            : "Roman Urdu";
+
+        const strictInstruction = `You are the customer assistant for A-One Foods. You must respond in STRICTLY ${langName} (Roman Urdu by default). Maximum 1 short sentence. NEVER generate menu lists or prices. Always tell the user to click the menu button below to order.`;
+
+        const aiResult = await generateMultiProviderReply(text, strictInstruction);
+        const reply = aiResult.text || "Ji janab, khana dekhne ke liye 'View Menu' par tap karein.";
+        
+        await sendWhatsApp(from, { type: "text", text: { body: reply } });
+        await sendMainMenuButtons(from, session.language);
+      } catch (e) {
+        await sendMainMenuButtons(from, session.language);
+      }
+      return NextResponse.json({ status: "success" });
     }
 
-    // Interactive Button / List Handling
+    // =========================================================================
+    //  2. INTERACTIVE BUTTONS & LISTS INBOUND
+    // =========================================================================
     if (message.type === "interactive") {
       const actionId = message.interactive.button_reply?.id || message.interactive.list_reply?.id;
       const title = message.interactive.button_reply?.title || message.interactive.list_reply?.title;
 
-      await persistDbMessage(from, profileName, "USER", `[Tapped: ${title || actionId}]`);
-
-      // Staff Support Handoff Trigger
-      if (actionId === "btn_staff_support") {
-        session.status = "HUMAN_REQUESTED";
-        session.aiActive = false;
-        session.unreadAlert = true;
-        session.humanRequestedAt = Date.now();
-
-        await persistDbMessage(from, profileName, "USER", "[Requested Staff Support]", "PENDING");
-
-        const handoffReply = "Aapki request staff ko forward kar di gayi hai. Hamara representative jald hi aapse baat karega.";
-        await sendToWhatsApp(from, {
-          type: "text",
-          text: { body: handoffReply },
-        });
-        await persistDbMessage(from, profileName, "ASSISTANT", handoffReply, "PENDING");
+      // 2a. Language Selection (Flow 1 -> Flow 2)
+      if (
+        actionId === "set_lang_roman" ||
+        actionId === "set_lang_urdu" ||
+        actionId === "set_lang_en" ||
+        actionId === "lang_roman" ||
+        actionId === "lang_urdu" ||
+        actionId === "lang_en"
+      ) {
+        session.language =
+          actionId.includes("urdu") ? "URDU" : actionId.includes("en") ? "ENGLISH" : "ROMAN_URDU";
+        await sendMainMenuButtons(from, session.language);
         return NextResponse.json({ status: "success" });
       }
 
+      // 2b. Change Language Button Tapped
+      if (actionId === "btn_change_lang") {
+        await sendLanguageSelection(from);
+        return NextResponse.json({ status: "success" });
+      }
+
+      // 2c. View Menu Button Tapped -> Send Category List (Flow 3)
       if (actionId === "btn_show_menu") {
-        resetUserSession(from);
-        await persistDbMessage(from, profileName, "USER", "[View Menu Tap]", "OPEN");
-        await sendToWhatsApp(from, {
-          type: "interactive",
-          interactive: {
-            type: "list",
-            header: { type: "text", text: "A-One Foods Menu" },
-            body: { text: "Apni pasand ki category choose karein:" },
-            action: {
-              button: "Categories",
-              sections: [
-                {
-                  title: "Categories",
-                  rows: [
-                    { id: "cat_pizza", title: "🍕 Pizza", description: "Regular, Special & Stuffed Crust" },
-                    { id: "cat_deals", title: "🔥 Special Deals", description: "Deal 1 se Deal 8 tak" },
-                    { id: "cat_burgers", title: "🍔 Broast & Burgers", description: "Broast, zingers aur wraps" },
-                    { id: "cat_shawarma", title: "🌯 Shawarma & Parathas", description: "Shawarma aur crispy rolls" },
-                    { id: "cat_pasta", title: "🍝 Pasta & Fries", description: "Baked pasta aur fries" },
-                    { id: "cat_rice", title: "🍚 Rice & Traditional", description: "Biryani, pulao aur traditional" },
-                    { id: "cat_family", title: "👨‍👩‍👧‍👦 Family & Summer Deals", description: "Family boxes aur combos" },
-                  ],
-                },
-              ],
-            },
+        resetSession(from);
+        await sendCategoriesList(from, session.language);
+        return NextResponse.json({ status: "success" });
+      }
+
+      // 2d. Special Deals Button Tapped -> Send Deals Items List (Flow 4)
+      if (actionId === "btn_show_deals") {
+        await sendCategoryItemsList(from, "cat_special_deals", session.language);
+        return NextResponse.json({ status: "success" });
+      }
+
+      // 2e. Staff Support Tapped
+      if (actionId === "btn_staff_help") {
+        let fallbackMsg =
+          "Aapki request staff ko forward kar di gayi hai. Hamara representative jald hi aapse raabta karega.";
+        try {
+          const { settings } = await getRestaurantSettings();
+          if (settings?.whatsappConfig?.fallbackMessage) {
+            fallbackMsg = settings.whatsappConfig.fallbackMessage;
+          }
+        } catch {}
+
+        await sendWhatsApp(from, {
+          type: "text",
+          text: {
+            body: fallbackMsg,
           },
         });
-      } else if (actionId === "btn_show_deals" || actionId.startsWith("cat_")) {
-        const catKey = actionId === "btn_show_deals" ? "cat_deals" : actionId;
-        const catData = MENU_DATA[catKey];
-        if (catData) {
-          await sendToWhatsApp(from, {
-            type: "interactive",
-            interactive: {
-              type: "list",
-              header: { type: "text", text: catData.title },
-              body: { text: "Apna manpasand item select karein:" },
-              action: {
-                button: "Items List",
-                sections: [{ title: catData.title, rows: catData.rows }],
-              },
-            },
-          });
-        }
-      } else {
-        // Item is selected by the user
-        session.selectedItem = title;
-        session.step = "AWAITING_QUANTITY";
+        return NextResponse.json({ status: "success" });
+      }
 
-        const replyBody = `Aapne select kiya: *${title}*\n\nKitni quantity chahiye? (Jaise 1, 2, 3...)`;
-        await sendToWhatsApp(from, {
+      // 2f. Category Row Tapped -> Send Items List for that category (Flow 4)
+      if (actionId && actionId.startsWith("cat_")) {
+        await sendCategoryItemsList(from, actionId, session.language);
+        return NextResponse.json({ status: "success" });
+      }
+
+      // 2g. Confirm Order Tapped -> Ask for Quantity & Delivery Address (Flow 5)
+      if (
+        actionId === "btn_confirm_order" ||
+        actionId === "btn_confirm_item"
+      ) {
+        session.step = "AWAITING_ORDER_DETAILS";
+        await sendWhatsApp(from, {
           type: "text",
-          text: { body: replyBody },
+          text: {
+            body: "Meharbani farma kar Quantity (1, 2...) aur Delivery Address likh kar bhej dein.",
+          },
         });
-        await persistDbMessage(from, profileName, "ASSISTANT", replyBody);
+        return NextResponse.json({ status: "success" });
+      }
+
+      // 2h. Food Item Row Tapped -> 1-Tap Confirmation Buttons (Flow 5)
+      if (actionId) {
+        const item = findItemById(actionId) || { id: actionId, title: title || "Selected Item", description: "" };
+        session.selectedItem = item.title;
+        session.selectedItemDetails = item;
+        await sendItemConfirmation(from, item, session.language);
+        return NextResponse.json({ status: "success" });
       }
     }
 
     return NextResponse.json({ status: "success" });
   } catch (error) {
-    console.error("[webhook POST error]:", error);
+    console.error("Webhook POST Error:", error);
     return NextResponse.json({ status: "error" }, { status: 500 });
   }
 }

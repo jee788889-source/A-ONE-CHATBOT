@@ -81,17 +81,25 @@ export const DEFAULT_SETTINGS: RestaurantSettingsData = {
     bank: { bankName: "Meezan Bank", accountTitle: "A-ONE Foods PVT LTD", iban: "PK00MEZN0000123456789012" },
   },
   whatsappConfig: {
+    phoneNumberId: "",
+    businessAccountId: "",
+    accessToken: "",
+    verifyToken: "",
     welcomeMessage:
-      "Welcome to A-ONE Restaurant! 🍔🍕\nHow may we serve you today?\n\nType *Menu* to see our dishes or *Order* to start an order.",
+      "Assalam-o-Alaikum! A-One Foods mein khushamdeed. Main A-One se baat kar raha hoon. Aapke liye kya order le kar aayen?",
     autoReplyEnabled: true,
-    fallbackMessage: "Thank you for contacting A-ONE Restaurant. One of our team members will assist you.",
+    fallbackMessage:
+      "Aapki request staff ko forward kar di gayi hai. Hamara representative jald hi aapse direct rabta karega.",
   },
   aiSettings: {
-    provider: "openrouter",
-    model: "openrouter/free",
+    provider: "gemini",
+    model: "gemini-1.5-pro",
     temperature: 0.2,
     maxTokens: 600,
     strictGuardrails: true,
+    geminiApiKey: "",
+    openaiApiKey: "",
+    anthropicApiKey: "",
   },
 };
 

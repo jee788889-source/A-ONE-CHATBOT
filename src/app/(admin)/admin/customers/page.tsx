@@ -16,6 +16,8 @@ import {
   X,
   Save,
   CheckCircle2,
+  Trash2,
+  AlertTriangle,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -26,6 +28,7 @@ export default function CustomersPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [isOwnerUser, setIsOwnerUser] = useState(false);
 
   // Edit Customer Modal state
   const [editingCustomer, setEditingCustomer] = useState<any | null>(null);
@@ -34,6 +37,10 @@ export default function CustomersPage() {
   const [editAddress, setEditAddress] = useState("");
   const [editNotes, setEditNotes] = useState("");
   const [savingEdit, setSavingEdit] = useState(false);
+
+  // Delete Customer Modal state (Owner Only)
+  const [customerToDelete, setCustomerToDelete] = useState<any | null>(null);
+  const [deletingCustomer, setDeletingCustomer] = useState(false);
 
   async function loadCustomers() {
     setLoading(true);
@@ -46,6 +53,9 @@ export default function CustomersPage() {
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || "Failed to load customers");
       setCustomers(data.customers || []);
+      if (data.isOwner !== undefined) {
+        setIsOwnerUser(Boolean(data.isOwner));
+      }
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -124,17 +134,47 @@ export default function CustomersPage() {
     }
   }
 
+  async function handleDeleteCustomerConfirm() {
+    if (!customerToDelete || !isOwnerUser || deletingCustomer) return;
+    setDeletingCustomer(true);
+
+    try {
+      const res = await fetch(`/api/admin/customers/${customerToDelete.id}`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "Failed to delete customer");
+      }
+
+      // Immediately purge from state so they disappear across portals
+      setCustomers((prev) => prev.filter((c) => c.id !== customerToDelete.id));
+      setCustomerToDelete(null);
+    } catch (err: any) {
+      alert("Delete Error: " + err.message);
+    } finally {
+      setDeletingCustomer(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl md:text-3xl font-black tracking-tight text-white flex items-center gap-2">
-            <Users className="size-6 text-amber-500" />
-            Customer Directory & Profiles
-          </h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl md:text-3xl font-black tracking-tight text-white flex items-center gap-2">
+              <Users className="size-6 text-amber-500" />
+              Customer Directory & Profiles
+            </h1>
+            {isOwnerUser && (
+              <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                Owner Access
+              </span>
+            )}
+          </div>
           <p className="text-xs text-neutral-400 mt-1">
-            Registered phone contacts, ordering metrics, profile editing, and customer archives.
+            Registered phone contacts, ordering metrics, profile editing, and owner customer deletion.
           </p>
         </div>
         <Button
@@ -158,93 +198,88 @@ export default function CustomersPage() {
           className="flex items-center gap-2 w-full sm:w-80"
         >
           <div className="relative w-full">
-            <Search className="size-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-neutral-500" />
             <Input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search name, phone, address..."
-              className="pl-9 bg-neutral-900 border-neutral-800 text-xs h-9 text-neutral-200 placeholder:text-neutral-600"
+              className="bg-neutral-900 border-neutral-800 pl-9 text-xs h-9"
             />
           </div>
-          <Button type="submit" size="sm" variant="outline" className="border-neutral-800 bg-neutral-900 text-xs">
+          <Button type="submit" size="sm" className="bg-amber-500 hover:bg-amber-600 text-neutral-950 font-bold text-xs h-9">
             Search
           </Button>
         </form>
       </div>
 
       {error && (
-        <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm flex items-center gap-2">
-          <AlertCircle className="size-4" />
-          <span>{error}</span>
+        <div className="p-3.5 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-400 text-xs font-semibold flex items-center gap-2">
+          <AlertCircle className="size-4 shrink-0" />
+          {error}
         </div>
       )}
 
       {/* Customers Table */}
-      <Card className="bg-neutral-900/60 border-neutral-800 backdrop-blur">
+      <Card className="bg-neutral-900/70 border-neutral-800">
         <CardContent className="p-0">
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-neutral-950/80 border-b border-neutral-800 text-neutral-400 uppercase font-bold tracking-wider">
+            <table className="w-full text-left text-xs text-neutral-300">
+              <thead className="bg-neutral-950/80 text-[11px] font-bold text-neutral-400 uppercase tracking-wider border-b border-neutral-800">
                 <tr>
-                  <th className="px-4 py-3.5">Customer Name & Phone</th>
-                  <th className="px-4 py-3.5">Delivery Address</th>
-                  <th className="px-4 py-3.5">Orders Count</th>
-                  <th className="px-4 py-3.5">Total Spent</th>
-                  <th className="px-4 py-3.5">Notes</th>
-                  <th className="px-4 py-3.5 text-right">Actions</th>
+                  <th className="px-4 py-3">Customer</th>
+                  <th className="px-4 py-3">Phone Number</th>
+                  <th className="px-4 py-3">Delivery Address</th>
+                  <th className="px-4 py-3">Total Orders</th>
+                  <th className="px-4 py-3">Total Spent</th>
+                  <th className="px-4 py-3">Staff Notes</th>
+                  <th className="px-4 py-3 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-neutral-800/60">
-                {loading && (
+                {loading && customers.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="px-4 py-12 text-center text-neutral-500">
-                      Loading customers...
+                    <td colSpan={7} className="px-4 py-12 text-center text-neutral-500">
+                      Loading customer directory...
                     </td>
                   </tr>
                 )}
+
                 {!loading && customers.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="px-4 py-12 text-center text-neutral-500">
-                      No customers found.
+                    <td colSpan={7} className="px-4 py-12 text-center text-neutral-500">
+                      No customer profiles found matching your search.
                     </td>
                   </tr>
                 )}
-                {customers.map((c, cIdx) => {
+
+                {customers.map((c) => {
                   const isArchived = c.notes?.includes("[ARCHIVED]");
 
                   return (
                     <tr
-                      key={c.id ? `${c.id}-${cIdx}` : `cust-${cIdx}`}
+                      key={c.id}
                       className={`hover:bg-neutral-800/30 transition-colors ${
-                        isArchived ? "opacity-60 bg-neutral-950/40" : ""
+                        isArchived ? "opacity-50 bg-neutral-950/40" : ""
                       }`}
                     >
                       <td className="px-4 py-3.5">
-                        <div className="flex items-center gap-3">
-                          <div className="size-8 rounded-xl bg-neutral-800 border border-neutral-700 flex items-center justify-center text-amber-400 font-bold text-xs shrink-0">
-                            {c.name ? c.name.charAt(0).toUpperCase() : <Users className="size-4" />}
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <p className="font-bold text-neutral-100">{c.name || "WhatsApp Customer"}</p>
-                              {isArchived && (
-                                <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-neutral-800 text-neutral-400 border border-neutral-700">
-                                  ARCHIVED
-                                </span>
-                              )}
-                            </div>
-                            <p className="text-[11px] text-neutral-400 font-mono flex items-center gap-1">
-                              <Phone className="size-3 text-amber-500" />
-                              {c.phone}
-                            </p>
-                          </div>
+                        <div className="font-bold text-white flex items-center gap-1.5">
+                          {c.name || "Customer " + c.phone.slice(-4)}
+                          {isArchived && (
+                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-400 uppercase font-semibold">
+                              Archived
+                            </span>
+                          )}
                         </div>
                       </td>
-                      <td className="px-4 py-3.5 text-neutral-300 max-w-xs truncate">
+                      <td className="px-4 py-3.5 font-mono text-neutral-300">
+                        {c.phone}
+                      </td>
+                      <td className="px-4 py-3.5 text-neutral-400 max-w-xs truncate">
                         {c.address ? (
                           <span className="flex items-center gap-1">
-                            <MapPin className="size-3 text-neutral-500 shrink-0" />
-                            {c.address}
+                            <MapPin className="size-3 text-amber-500 shrink-0" />
+                            <span className="truncate">{c.address}</span>
                           </span>
                         ) : (
                           "—"
@@ -261,7 +296,7 @@ export default function CustomersPage() {
                       <td className="px-4 py-3.5 text-neutral-400 text-[11px] max-w-xs truncate">
                         {c.notes?.replace("[ARCHIVED]", "").trim() || "—"}
                       </td>
-                      <td className="px-4 py-3.5 text-right space-x-1">
+                      <td className="px-4 py-3.5 text-right space-x-1 whitespace-nowrap">
                         <Button
                           size="sm"
                           variant="ghost"
@@ -300,6 +335,20 @@ export default function CustomersPage() {
                           <Phone className="size-3 mr-1" />
                           Chat
                         </Button>
+
+                        {/* Owner-Only Delete Customer & History Button */}
+                        {isOwnerUser && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => setCustomerToDelete(c)}
+                            className="h-7 text-[11px] text-red-400 hover:text-red-200 hover:bg-red-500/20 px-2"
+                            title="Delete Customer & History (Owner Only)"
+                          >
+                            <Trash2 className="size-3 mr-1 text-red-400" />
+                            Delete
+                          </Button>
+                        )}
                       </td>
                     </tr>
                   );
@@ -394,6 +443,69 @@ export default function CustomersPage() {
                 </div>
               </CardContent>
             </form>
+          </Card>
+        </div>
+      )}
+
+      {/* Delete Customer & History Confirmation Modal (Owner Only) */}
+      {customerToDelete && isOwnerUser && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <Card className="w-full max-w-md bg-neutral-900 border-red-500/40 text-neutral-100 shadow-2xl">
+            <CardHeader className="flex flex-row items-start justify-between border-b border-neutral-800 pb-4">
+              <div className="flex items-center gap-2.5 text-red-400">
+                <AlertTriangle className="size-5 text-red-400 shrink-0" />
+                <div>
+                  <CardTitle className="text-sm font-bold text-white">
+                    Delete Customer & History
+                  </CardTitle>
+                  <CardDescription className="text-xs text-neutral-400">
+                    Owner Authorization Required
+                  </CardDescription>
+                </div>
+              </div>
+              <button
+                onClick={() => setCustomerToDelete(null)}
+                className="p-1 rounded-lg text-neutral-400 hover:text-white"
+              >
+                <X className="size-5" />
+              </button>
+            </CardHeader>
+            <CardContent className="space-y-4 pt-4 text-xs">
+              <p className="text-neutral-300 leading-relaxed">
+                Are you sure? This will remove the customer profile and all chat history for all staff members.
+              </p>
+              <div className="p-3 rounded-lg bg-neutral-950 border border-neutral-800 space-y-1 font-mono text-[11px]">
+                <p className="text-white font-bold">{customerToDelete.name || "Customer"}</p>
+                <p className="text-amber-400">{customerToDelete.phone}</p>
+                <p className="text-neutral-500 text-[10px]">
+                  Total Orders: {customerToDelete.totalOrders || customerToDelete._count?.orders || 0}
+                </p>
+              </div>
+              <p className="text-red-400 text-[11px] font-semibold">
+                ⚠️ This action is permanent and cannot be undone.
+              </p>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setCustomerToDelete(null)}
+                  disabled={deletingCustomer}
+                  className="border-neutral-800 bg-neutral-950 text-xs"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  onClick={handleDeleteCustomerConfirm}
+                  disabled={deletingCustomer}
+                  className="bg-red-600 hover:bg-red-700 text-white font-bold text-xs"
+                >
+                  <Trash2 className="size-3.5 mr-1" />
+                  {deletingCustomer ? "Purging Record..." : "Delete Customer & History"}
+                </Button>
+              </div>
+            </CardContent>
           </Card>
         </div>
       )}

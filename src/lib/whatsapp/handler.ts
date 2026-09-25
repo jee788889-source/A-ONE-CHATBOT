@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/db";
 import { config } from "@/lib/config";
 import { processCustomerMessage } from "@/lib/ai/engine";
-import { sendText, sendButtons, type SendResult } from "./client";
+import { sendText, sendButtons, sendList, type SendResult } from "./client";
 import type { InboundMessage } from "./types";
 
 /**
@@ -36,6 +36,7 @@ interface PersistedInbound {
  * admin inbox. A database outage must never make the bot go silent.
  */
 export async function handleInbound(message: InboundMessage): Promise<void> {
+  console.log(">>> [ACTIVE WEBHOOK HIT: handleInbound] Received message:", JSON.stringify(message, null, 2));
   const phone = message.waId.startsWith("+") ? message.waId : `+${message.waId}`;
   const rawText = (message.text || "").trim();
 
@@ -88,10 +89,20 @@ export async function handleInbound(message: InboundMessage): Promise<void> {
     }
 
     // 6. Dispatch reply via WhatsApp Cloud API
-    const sent: SendResult =
-      botReply.buttons && botReply.buttons.length > 0
-        ? await sendButtons(message.waId, botReply.text, botReply.buttons, "A-ONE Restaurant")
-        : await sendText(message.waId, botReply.text);
+    let sent: SendResult;
+    if (botReply.list && botReply.list.rows && botReply.list.rows.length > 0) {
+      sent = await sendList(
+        message.waId,
+        botReply.text,
+        botReply.list.buttonLabel,
+        botReply.list.rows,
+        botReply.list.header
+      );
+    } else if (botReply.buttons && botReply.buttons.length > 0) {
+      sent = await sendButtons(message.waId, botReply.text, botReply.buttons, "A-ONE Restaurant");
+    } else {
+      sent = await sendText(message.waId, botReply.text);
+    }
 
     if (!sent.ok) {
       console.error(`[whatsapp] reply to ${phone} was not delivered: ${sent.error}`);

@@ -39,6 +39,8 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const raw = await req.text();
 
+  console.log(">>> [ACTIVE WEBHOOK HIT: /api/whatsapp/webhook] Received raw body:", raw.slice(0, 300));
+
   if (!verifySignature(raw, req.headers.get("x-hub-signature-256"))) {
     console.warn("[whatsapp] rejected webhook with invalid signature.");
     await logEvent({

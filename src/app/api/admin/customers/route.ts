@@ -16,8 +16,15 @@ export async function GET(req: NextRequest) {
   const search = searchParams.get("search")?.trim() || undefined;
 
   try {
+    const { isOwner } = await import("@/lib/session");
+    const isOwnerUser =
+      isOwner(session) ||
+      session?.role === "OWNER" ||
+      (session?.role as string)?.toUpperCase() === "ADMIN_OWNER" ||
+      (session?.role as string)?.toLowerCase() === "owner";
+
     const customers = await fetchAllCustomers(search);
-    return Response.json({ ok: true, customers });
+    return Response.json({ ok: true, customers, isOwner: Boolean(isOwnerUser) });
   } catch (error: any) {
     console.error("[customers GET] error:", error);
     return Response.json({ ok: false, error: error?.message || "Failed to fetch customers." }, { status: 500 });

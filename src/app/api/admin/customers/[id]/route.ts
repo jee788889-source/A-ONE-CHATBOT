@@ -84,3 +84,63 @@ export async function PATCH(
     return Response.json({ ok: false, error: "Failed to update customer." }, { status: 500 });
   }
 }
+
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const session = await getSession();
+  const { isOwner } = await import("@/lib/session");
+  const isOwnerUser =
+    isOwner(session) ||
+    session?.role === "OWNER" ||
+    (session?.role as string)?.toUpperCase() === "ADMIN_OWNER" ||
+    (session?.role as string)?.toLowerCase() === "owner";
+
+  if (!session || !isOwnerUser) {
+    return Response.json(
+      { ok: false, error: "Forbidden. Only the Restaurant Owner can permanently delete customer records and history." },
+      { status: 403 }
+    );
+  }
+
+  const { id } = await params;
+  if (!id) {
+    return Response.json({ ok: false, error: "Customer ID is required." }, { status: 400 });
+  }
+
+  const ip = clientIp(req);
+
+  try {
+    const existing = await fetchCustomerById(id);
+    const { deleteCustomerById } = await import("@/lib/customer-store");
+    await deleteCustomerById(id);
+
+    await logAuditEvent({
+      actorId: session.sub,
+      actorEmail: session.email || "owner",
+      action: "CUSTOMER_PERMANENTLY_DELETED",
+      target: existing?.phone || id,
+      details: {
+        customerId: id,
+        customerName: existing?.name,
+        customerPhone: existing?.phone,
+        totalOrdersPurged: existing?.totalOrders,
+        purgedBy: session.name,
+      },
+      ipAddress: ip,
+      userAgent: req.headers.get("user-agent") || undefined,
+    });
+
+    return Response.json({
+      ok: true,
+      message: "Customer profile and complete order/chat history permanently removed.",
+    });
+  } catch (error: any) {
+    console.error("[customer DELETE] error:", error);
+    return Response.json(
+      { ok: false, error: error?.message || "Failed to delete customer." },
+      { status: 500 }
+    );
+  }
+}

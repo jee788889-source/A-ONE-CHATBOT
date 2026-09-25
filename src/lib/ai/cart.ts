@@ -31,6 +31,7 @@ export interface ConversationState {
     price: number;
   } | null;
   isHumanHandoff?: boolean;
+  language?: "roman" | "ur" | "en" | string;
   updatedAt: number;
 }
 

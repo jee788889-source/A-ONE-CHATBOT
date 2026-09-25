@@ -35,111 +35,27 @@ export interface DeliverySettingsResult {
  * The AI cannot invent prices, availability, delivery fees, or items.
  */
 
+import { COMPLETE_CATEGORIES_DATA, COMPLETE_ITEMS_DATA } from "@/lib/menu-store";
+
 const FALLBACK_MENU: Array<{
   id: string;
   name: string;
   urduName?: string | null;
   items: MenuItemResult[];
-}> = [
-  {
-    id: "cat-burgers",
-    name: "Burgers & Sandwiches",
-    urduName: "برگر اور سینڈوچ",
-    items: [
-      {
-        id: "item-beef-burger",
-        name: "A-ONE Special Beef Smash Burger",
-        urduName: "اے ون اسپیشل بیف برگر",
-        description: "Double beef patty, melted cheddar, caramelized onions, secret sauce",
-        price: 850,
-        isAvailable: true,
-        preparationTime: 15,
-        categoryName: "Burgers & Sandwiches",
-      },
-      {
-        id: "item-zinger",
-        name: "Crispy Zinger Crunch Burger",
-        urduName: "کرسپی زنگر برگر",
-        description: "Golden fried crispy chicken breast fillet, spicy mayo, lettuce",
-        price: 650,
-        isAvailable: true,
-        preparationTime: 12,
-        categoryName: "Burgers & Sandwiches",
-      },
-    ],
-  },
-  {
-    id: "cat-rice",
-    name: "Rice & Biryani",
-    urduName: "بریانی اور چاول",
-    items: [
-      {
-        id: "item-biryani",
-        name: "A-ONE Special Chicken Dum Biryani",
-        urduName: "اے ون اسپیشل چکن دم بریانی",
-        description: "Fragrant basmati rice layered with spiced chicken & saffron aroma",
-        price: 520,
-        isAvailable: true,
-        preparationTime: 10,
-        categoryName: "Rice & Biryani",
-      },
-    ],
-  },
-  {
-    id: "cat-savories",
-    name: "Traditional Savories & Nimko",
-    urduName: "روایتی نمکو اور اسنیکس",
-    items: [
-      {
-        id: "item-samosa",
-        name: "Crispy A-ONE Potato & Beef Samosa",
-        urduName: "اے ون کرسپی سموسہ",
-        description: "Handcrafted crispy pastry filled with aromatic spiced potatoes or beef",
-        price: 80,
-        isAvailable: true,
-        preparationTime: 5,
-        categoryName: "Traditional Savories & Nimko",
-      },
-      {
-        id: "item-nimko",
-        name: "A-ONE Special Mix Nimko (400g)",
-        urduName: "اے ون اسپیشل مکس نمکو",
-        description: "Crispy savory blend of spiced grams, sev, and roasted nuts",
-        price: 380,
-        isAvailable: true,
-        preparationTime: 5,
-        categoryName: "Traditional Savories & Nimko",
-      },
-      {
-        id: "item-fries",
-        name: "Loaded Masala French Fries",
-        urduName: "مصالحہ فرائز",
-        description: "Crispy golden potato fries seasoned with chef's signature chaat masala",
-        price: 250,
-        isAvailable: true,
-        preparationTime: 8,
-        categoryName: "Traditional Savories & Nimko",
-      },
-    ],
-  },
-  {
-    id: "cat-beverages",
-    name: "Beverages & Drinks",
-    urduName: "مشروبات اور کولڈ ڈرنکس",
-    items: [
-      {
-        id: "item-coke",
-        name: "Chilled Coke (500ml)",
-        urduName: "کوک",
-        description: "Ice cold refreshing Coca-Cola pet bottle",
-        price: 120,
-        isAvailable: true,
-        preparationTime: 2,
-        categoryName: "Beverages & Drinks",
-      },
-    ],
-  },
-];
+}> = COMPLETE_CATEGORIES_DATA.map((c) => ({
+  id: c.id,
+  name: c.name,
+  urduName: c.urduName,
+  items: COMPLETE_ITEMS_DATA.filter((i) => i.categoryId === c.id).map((i) => ({
+    id: i.id,
+    name: i.name,
+    description: i.description,
+    price: i.price,
+    isAvailable: true,
+    preparationTime: 15,
+    categoryName: c.name,
+  })),
+}));
 
 /** 1. Fetch full active menu categorized */
 export async function get_menu(): Promise<{
