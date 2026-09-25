@@ -779,64 +779,29 @@ export default function ConversationsInboxPage() {
         <Card className="flex-1 min-w-0 h-full min-h-0 bg-neutral-900/90 border-neutral-800 flex flex-col overflow-hidden">
           {selectedConv ? (
             <>
-              {/* Clean Two-Column Chat Header Layout */}
-              <div className="w-full flex items-center justify-between px-4 py-3 bg-zinc-900 border-b border-zinc-800 shrink-0 gap-3">
-                
-                {/* LEFT SIDE: User Identity & Connection Status */}
-                <div className="flex items-center gap-3 min-w-0">
-                  {/* WhatsApp Channel Icon */}
-                  <div
-                    className={`flex items-center justify-center w-9 h-9 rounded-full font-bold text-xs border shrink-0 ${
-                      selectedConv.status === "PENDING"
-                        ? "bg-red-500/20 text-red-400 border-red-500/30"
-                        : "bg-emerald-600/20 text-emerald-400 border-emerald-500/30"
-                    }`}
-                  >
-                    {selectedConv.status === "PENDING" ? <Headphones className="size-4" /> : "WA"}
-                  </div>
+              {/* TWO-ROW STACKED CHAT HEADER (Row 1: Actions, Row 2: Customer & Status) */}
+              <div className="w-full flex flex-col bg-zinc-900 border-b border-zinc-800 flex-shrink-0">
 
-                  {/* Customer Info */}
-                  <div className="flex flex-col min-w-0">
-                    <span className="text-sm font-semibold text-white truncate">
-                      {selectedConv.customerName || selectedConv.customerPhone || "Customer"}
-                    </span>
-                    <span className="text-xs text-zinc-400 font-mono truncate">
-                      {selectedConv.customerPhone}
-                    </span>
-                  </div>
-
-                  {/* Status Tag (Running / AI Active / Human Mode) */}
-                  {selectedConv.status === "PENDING" ? (
-                    <span className="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-red-500/15 text-red-400 border border-red-500/30 shrink-0 animate-pulse">
-                      👤 Human Mode
-                    </span>
-                  ) : (
-                    <span className="px-2.5 py-0.5 text-xs font-medium rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shrink-0">
-                      🤖 AI Active
-                    </span>
-                  )}
-                </div>
-
-                {/* RIGHT SIDE: Action Buttons */}
-                <div className="flex items-center gap-2 shrink-0 flex-wrap">
-                  {/* 1. Staff Busy Quick Button */}
+                {/* ROW 1: TOP ACTION CONTROLS BAR (UPR WALI LINE) */}
+                <div className="w-full flex items-center justify-end gap-2 px-4 py-2 bg-zinc-950/60 border-b border-zinc-800/60">
+                  {/* Staff Busy Button */}
                   <button
                     type="button"
                     onClick={handleSendStaffBusy}
                     disabled={sendingBusy}
-                    className="px-3 py-1.5 text-xs font-medium text-amber-300 bg-amber-950/60 hover:bg-amber-900/80 border border-amber-600/40 rounded-lg transition-colors flex items-center gap-1.5 shrink-0"
+                    className="px-3 py-1.5 text-xs font-semibold text-amber-300 bg-amber-950/80 hover:bg-amber-900 border border-amber-600/40 rounded-md transition-all flex items-center gap-1.5 shadow-sm"
                     title="Send instant 'Staff Busy' notice to customer"
                   >
                     <span>⏳</span> Staff Busy
                   </button>
 
-                  {/* 2. Take Over / Resume to AI Button */}
+                  {/* Take Over / Resume to AI Button */}
                   {selectedConv.status === "PENDING" ? (
                     <button
                       type="button"
                       onClick={() => handleToggleTakeover("OPEN")}
                       disabled={togglingStatus}
-                      className="px-3 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 rounded-lg transition-colors shadow-sm flex items-center gap-1.5 shrink-0"
+                      className="px-3.5 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 rounded-md transition-all flex items-center gap-1.5 shadow-sm"
                       title="Resume AI Bot"
                     >
                       <Bot className="size-3.5 mr-0.5" /> Resume to AI
@@ -846,25 +811,65 @@ export default function ConversationsInboxPage() {
                       type="button"
                       onClick={() => handleToggleTakeover("PENDING")}
                       disabled={togglingStatus}
-                      className="px-3 py-1.5 text-xs font-semibold text-zinc-900 bg-amber-400 hover:bg-amber-300 rounded-lg transition-colors shadow-sm flex items-center gap-1.5 shrink-0"
+                      className="px-3.5 py-1.5 text-xs font-bold text-zinc-950 bg-amber-400 hover:bg-amber-300 rounded-md transition-all flex items-center gap-1.5 shadow-sm"
                       title="Take Over Chat"
                     >
                       <span>👤</span> Take Over Chat
                     </button>
                   )}
 
-                  {/* 3. Delete Action (Owner Only) */}
+                  {/* Delete Button (Owner Only) */}
                   {isOwnerUser && (
                     <button
                       type="button"
                       onClick={() => setShowDeleteModal(true)}
-                      className="p-1.5 text-xs font-medium text-rose-400 hover:text-rose-300 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 rounded-lg transition-colors shrink-0 flex items-center justify-center size-8"
-                      title="Delete Chat (Owner Only)"
+                      className="p-1.5 text-xs font-medium text-rose-400 hover:text-rose-300 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 rounded-md transition-all flex items-center justify-center size-8"
+                      title="Delete Conversation (Owner Only)"
                     >
                       <Trash2 className="size-4" />
                     </button>
                   )}
                 </div>
+
+                {/* ROW 2: WA CUSTOMER & STATUS STRIP (NEECHE WALI LINE) */}
+                <div className="w-full flex items-center justify-between px-4 py-2.5">
+                  <div className="flex items-center gap-3 min-w-0">
+                    {/* WA Channel Icon */}
+                    <div
+                      className={`w-9 h-9 rounded-full font-bold flex items-center justify-center border text-xs shadow-inner shrink-0 ${
+                        selectedConv.status === "PENDING"
+                          ? "bg-red-500/20 text-red-400 border-red-500/30"
+                          : "bg-emerald-500/20 text-emerald-400 border-emerald-500/30"
+                      }`}
+                    >
+                      {selectedConv.status === "PENDING" ? <Headphones className="size-4" /> : "WA"}
+                    </div>
+
+                    {/* Customer Info */}
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-sm font-semibold text-white truncate">
+                        {selectedConv.customerName || selectedConv.customerPhone || "Customer"}
+                      </span>
+                      <span className="text-xs text-zinc-400 font-mono truncate">
+                        {selectedConv.customerPhone}
+                      </span>
+                    </div>
+
+                    {/* Status Badge */}
+                    {selectedConv.status === "PENDING" ? (
+                      <span className="ml-2 px-2.5 py-0.5 text-xs font-semibold rounded-full bg-red-500/15 text-red-400 border border-red-500/30 flex items-center gap-1.5 shrink-0 animate-pulse">
+                        <span className="w-2 h-2 rounded-full bg-red-400 animate-pulse"></span>
+                        Human Mode
+                      </span>
+                    ) : (
+                      <span className="ml-2 px-2.5 py-0.5 text-xs font-medium rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1.5 shrink-0">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                        Running
+                      </span>
+                    )}
+                  </div>
+                </div>
+
               </div>
 
               {/* Message Thread History Container (Expanded, Full Height Scroll) */}
