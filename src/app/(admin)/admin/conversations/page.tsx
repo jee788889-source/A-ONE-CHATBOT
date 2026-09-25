@@ -426,7 +426,7 @@ export default function ConversationsInboxPage() {
     }
 
     return (
-      <div className="space-y-4 text-xs">
+      <div className="space-y-4 text-xs pb-20">
         {/* Customer Identity Card */}
         <div className="p-3.5 rounded-xl bg-neutral-950 border border-neutral-800 space-y-2.5">
           <div className="flex items-center justify-between gap-2">

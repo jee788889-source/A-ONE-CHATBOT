@@ -153,20 +153,20 @@ export function AOneAssistantWidget({ userRole }: { userRole: Role }) {
   return (
     <>
       {/* Subtle floating Help / Assistant button */}
-      <div className="fixed bottom-5 right-5 z-40">
+      <div className="fixed bottom-3 right-4 z-40">
         <button
           type="button"
           onClick={() => setIsOpen(!isOpen)}
           aria-label="Open A-ONE Assistant"
-          className="group relative flex items-center gap-2.5 px-3.5 py-2.5 rounded-full bg-neutral-900/95 border border-amber-500/40 text-neutral-100 shadow-xl shadow-black/60 hover:bg-neutral-800 hover:border-amber-500 transition-all duration-200 backdrop-blur-md"
+          className="group relative flex items-center gap-2 px-3 py-1.5 rounded-full bg-neutral-900/95 border border-amber-500/40 text-neutral-100 shadow-xl shadow-black/60 hover:bg-neutral-800 hover:border-amber-500 transition-all duration-200 backdrop-blur-md"
         >
-          <div className="size-6 rounded-full bg-gradient-to-tr from-amber-500 to-orange-500 flex items-center justify-center text-neutral-950 font-bold">
-            <Sparkles className="size-3.5" />
+          <div className="size-5 rounded-full bg-gradient-to-tr from-amber-500 to-orange-500 flex items-center justify-center text-neutral-950 font-bold">
+            <Sparkles className="size-3" />
           </div>
           <span className="text-xs font-bold tracking-tight text-white pr-1">
             A-ONE Assistant
           </span>
-          <span className="text-[10px] font-semibold text-amber-400 bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.2 rounded-full hidden sm:inline-block">
+          <span className="text-[10px] font-semibold text-amber-400 bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.5 rounded-full hidden sm:inline-block">
             Help
           </span>
         </button>
