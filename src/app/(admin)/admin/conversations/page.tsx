@@ -779,92 +779,90 @@ export default function ConversationsInboxPage() {
         <Card className="flex-1 min-w-0 h-full min-h-0 bg-neutral-900/90 border-neutral-800 flex flex-col overflow-hidden">
           {selectedConv ? (
             <>
-              {/* Chat Header with Real-Time Takeover State & Owner-Only Delete Action */}
-              <div className="px-4 py-3 border-b border-neutral-800 flex items-center justify-between gap-4 bg-neutral-950/60 shrink-0 min-h-[64px]">
-                {/* Left Section: Customer name, phone number, and WhatsApp icon/badge */}
+              {/* Clean Two-Column Chat Header Layout */}
+              <div className="w-full flex items-center justify-between px-4 py-3 bg-zinc-900 border-b border-zinc-800 shrink-0 gap-3">
+                
+                {/* LEFT SIDE: User Identity & Connection Status */}
                 <div className="flex items-center gap-3 min-w-0">
+                  {/* WhatsApp Channel Icon */}
                   <div
-                    className={`size-10 rounded-xl border flex items-center justify-center font-bold text-xs shrink-0 shadow-sm ${
+                    className={`flex items-center justify-center w-9 h-9 rounded-full font-bold text-xs border shrink-0 ${
                       selectedConv.status === "PENDING"
-                        ? "bg-red-500/20 text-red-400 border-red-500/40 shadow-red-950/40"
-                        : "bg-emerald-500/15 text-emerald-400 border-emerald-500/30 shadow-emerald-950/40"
+                        ? "bg-red-500/20 text-red-400 border-red-500/30"
+                        : "bg-emerald-600/20 text-emerald-400 border-emerald-500/30"
                     }`}
                   >
-                    {selectedConv.status === "PENDING" ? <Headphones className="size-5" /> : "WA"}
+                    {selectedConv.status === "PENDING" ? <Headphones className="size-4" /> : "WA"}
                   </div>
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h3 className="text-sm font-bold text-white truncate">
-                        {selectedConv.customerName || selectedConv.customerPhone}
-                      </h3>
-                      {selectedConv.status === "PENDING" ? (
-                        <span className="text-[9px] px-2 py-0.5 rounded-full bg-red-500/20 text-red-400 border border-red-500/40 font-black animate-pulse uppercase">
-                          👤 HUMAN TAKEOVER ACTIVE
-                        </span>
-                      ) : (
-                        <span className="text-[9px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 font-bold uppercase">
-                          🤖 AI RUNNING
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-[11px] text-neutral-400 font-mono truncate mt-0.5">
+
+                  {/* Customer Info */}
+                  <div className="flex flex-col min-w-0">
+                    <span className="text-sm font-semibold text-white truncate">
+                      {selectedConv.customerName || selectedConv.customerPhone || "Customer"}
+                    </span>
+                    <span className="text-xs text-zinc-400 font-mono truncate">
                       {selectedConv.customerPhone}
-                    </p>
+                    </span>
                   </div>
+
+                  {/* Status Tag (Running / AI Active / Human Mode) */}
+                  {selectedConv.status === "PENDING" ? (
+                    <span className="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-red-500/15 text-red-400 border border-red-500/30 shrink-0 animate-pulse">
+                      👤 Human Mode
+                    </span>
+                  ) : (
+                    <span className="px-2.5 py-0.5 text-xs font-medium rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shrink-0">
+                      🤖 AI Active
+                    </span>
+                  )}
                 </div>
 
-                {/* Right Section: Action buttons container with clear padding and margins */}
-                <div className="flex items-center justify-end gap-3 flex-wrap shrink-0">
-                  {/* 1-Click Staff Busy Quick Action Button */}
-                  <Button
-                    size="sm"
-                    variant="outline"
+                {/* RIGHT SIDE: Action Buttons */}
+                <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                  {/* 1. Staff Busy Quick Button */}
+                  <button
+                    type="button"
                     onClick={handleSendStaffBusy}
                     disabled={sendingBusy}
-                    className="h-8 px-3 text-xs bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border-amber-500/30 font-semibold transition shrink-0"
+                    className="px-3 py-1.5 text-xs font-medium text-amber-300 bg-amber-950/60 hover:bg-amber-900/80 border border-amber-600/40 rounded-lg transition-colors flex items-center gap-1.5 shrink-0"
                     title="Send instant 'Staff Busy' notice to customer"
                   >
-                    <Clock className="size-3.5 mr-1.5 text-amber-400 shrink-0" />
-                    <span>⏳ Staff Busy</span>
-                  </Button>
+                    <span>⏳</span> Staff Busy
+                  </button>
 
-                  {/* Takeover Toggle Button */}
+                  {/* 2. Take Over / Resume to AI Button */}
                   {selectedConv.status === "PENDING" ? (
-                    <Button
-                      size="sm"
+                    <button
+                      type="button"
                       onClick={() => handleToggleTakeover("OPEN")}
                       disabled={togglingStatus}
-                      className="h-8 px-3 text-xs bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-500/40 font-bold shadow-md shadow-emerald-950/50 transition shrink-0"
-                      title="Resume AI Bot & Send Main Interactive Menu to Customer"
+                      className="px-3 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 rounded-lg transition-colors shadow-sm flex items-center gap-1.5 shrink-0"
+                      title="Resume AI Bot"
                     >
-                      <Bot className="size-3.5 mr-1.5 shrink-0" />
-                      <span>Resume to AI</span>
-                    </Button>
+                      <Bot className="size-3.5 mr-0.5" /> Resume to AI
+                    </button>
                   ) : (
-                    <Button
-                      size="sm"
+                    <button
+                      type="button"
                       onClick={() => handleToggleTakeover("PENDING")}
                       disabled={togglingStatus}
-                      className="h-8 px-3 text-xs bg-amber-500 hover:bg-amber-600 text-neutral-950 border border-amber-400/40 font-bold shadow-md shadow-amber-950/50 transition shrink-0"
-                      title="Switch to Manual Human Agent Support"
+                      className="px-3 py-1.5 text-xs font-semibold text-zinc-900 bg-amber-400 hover:bg-amber-300 rounded-lg transition-colors shadow-sm flex items-center gap-1.5 shrink-0"
+                      title="Take Over Chat"
                     >
-                      <UserCheck className="size-3.5 mr-1.5 shrink-0" />
-                      <span>Take Over Chat</span>
-                    </Button>
+                      <span>👤</span> Take Over Chat
+                    </button>
                   )}
 
-                  {/* Owner-Only Delete Conversation Button */}
+                  {/* 3. Delete Action (Owner Only) */}
                   {isOwnerUser && (
-                    <Button
-                      size="sm"
-                      variant="outline"
+                    <button
+                      type="button"
                       onClick={() => setShowDeleteModal(true)}
-                      className="h-8 px-3 text-xs border-red-500/40 bg-red-950/30 text-red-400 hover:bg-red-900/50 hover:text-red-200 font-semibold transition shrink-0"
-                      title="Delete Conversation (Owner Only)"
+                      className="p-1.5 text-xs font-medium text-rose-400 hover:text-rose-300 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 rounded-lg transition-colors shrink-0 flex items-center justify-center size-8"
+                      title="Delete Chat (Owner Only)"
                     >
-                      <Trash2 className="size-3.5 mr-1.5 text-red-400 shrink-0" />
-                      <span>Delete Chat</span>
-                    </Button>
+                      <Trash2 className="size-4" />
+                    </button>
                   )}
                 </div>
               </div>
