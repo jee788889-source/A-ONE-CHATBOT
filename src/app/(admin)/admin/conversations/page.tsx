@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import {
   MessagesSquare,
   Search,
@@ -24,6 +24,11 @@ import {
   ExternalLink,
   ChevronRight,
   ShieldAlert,
+  Volume2,
+  VolumeX,
+  BellRing,
+  Headphones,
+  Flame,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -68,6 +73,32 @@ interface Message {
   createdAt: string;
 }
 
+// Play notification sound using Web Audio API
+function playAlertChime() {
+  try {
+    const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContext) return;
+    const ctx = new AudioContext();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
+    osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.15); // A5
+
+    gain.gain.setValueAtTime(0.15, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.35);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start();
+    osc.stop(ctx.currentTime + 0.35);
+  } catch (e) {
+    // Ignore audio autoplay restrictions
+  }
+}
+
 export default function ConversationsInboxPage() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
@@ -79,12 +110,16 @@ export default function ConversationsInboxPage() {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sending, setSending] = useState(false);
   const [togglingStatus, setTogglingStatus] = useState(false);
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  const [activeAlert, setActiveAlert] = useState<string | null>(null);
+
+  const prevPendingCountRef = useRef(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const selectedConv = conversations.find((c) => c.id === selectedConvId);
 
   // 1. Fetch conversations list
-  async function loadConversations() {
+  const loadConversations = useCallback(async () => {
     try {
       let url = "/api/admin/conversations?";
       if (statusFilter !== "ALL") url += `status=${statusFilter}&`;
@@ -93,9 +128,30 @@ export default function ConversationsInboxPage() {
       const res = await fetch(url);
       const data = await res.json();
       if (data.ok) {
-        setConversations(data.conversations || []);
-        if (!selectedConvId && data.conversations?.length > 0) {
-          setSelectedConvId(data.conversations[0].id);
+        const list: Conversation[] = data.conversations || [];
+
+        // Sort: Put PENDING (Human Support Requested) at the very top
+        const sorted = [...list].sort((a, b) => {
+          if (a.status === "PENDING" && b.status !== "PENDING") return -1;
+          if (b.status === "PENDING" && a.status !== "PENDING") return 1;
+          return new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime();
+        });
+
+        // Trigger Audio Chime if new Human Support request comes in
+        const currentPendingCount = sorted.filter((c) => c.status === "PENDING").length;
+        if (currentPendingCount > prevPendingCountRef.current && soundEnabled) {
+          playAlertChime();
+          const firstPending = sorted.find((c) => c.status === "PENDING");
+          if (firstPending) {
+            setActiveAlert(`🚨 Human Support Requested by ${firstPending.customerName || firstPending.customerPhone}`);
+            setTimeout(() => setActiveAlert(null), 6000);
+          }
+        }
+        prevPendingCountRef.current = currentPendingCount;
+
+        setConversations(sorted);
+        if (!selectedConvId && sorted.length > 0) {
+          setSelectedConvId(sorted[0].id);
         }
       }
     } catch (err) {
@@ -103,10 +159,10 @@ export default function ConversationsInboxPage() {
     } finally {
       setLoadingList(false);
     }
-  }
+  }, [search, statusFilter, selectedConvId, soundEnabled]);
 
   // 2. Fetch messages for active conversation
-  async function loadMessages(convId: string) {
+  const loadMessages = useCallback(async (convId: string) => {
     setLoadingMessages(true);
     try {
       const res = await fetch(`/api/admin/messages?conversationId=${convId}`);
@@ -127,21 +183,21 @@ export default function ConversationsInboxPage() {
     } finally {
       setLoadingMessages(false);
     }
-  }
+  }, []);
 
   useEffect(() => {
     loadConversations();
-    const interval = setInterval(loadConversations, 10000);
+    const interval = setInterval(loadConversations, 5000);
     return () => clearInterval(interval);
-  }, [statusFilter]);
+  }, [loadConversations]);
 
   useEffect(() => {
     if (selectedConvId) {
       loadMessages(selectedConvId);
-      const interval = setInterval(() => loadMessages(selectedConvId), 6000);
+      const interval = setInterval(() => loadMessages(selectedConvId), 4000);
       return () => clearInterval(interval);
     }
-  }, [selectedConvId]);
+  }, [selectedConvId, loadMessages]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -170,14 +226,14 @@ export default function ConversationsInboxPage() {
           }
           return [...prev, data.message];
         });
-        // Also ensure mode is PENDING (Human takeover) when staff manually replies
+        // Ensure status is PENDING (Human takeover) when staff manually replies
         if (selectedConv && selectedConv.status !== "PENDING") {
           setConversations((prev) =>
             prev.map((c) => (c.id === selectedConvId ? { ...c, status: "PENDING" } : c))
           );
         }
       } else if (!data.ok) {
-        alert("Failed to send message: " + data.error);
+        alert("Failed to send message: " + (data.error || "Network error"));
       }
     } catch (err: any) {
       alert("Error: " + err.message);
@@ -215,11 +271,29 @@ export default function ConversationsInboxPage() {
   }
 
   return (
-    <div className="h-[calc(100vh-8rem)] flex flex-col space-y-4">
-      {/* Title */}
-      <div className="flex items-center justify-between">
+    <div className="h-[calc(100vh-6.5rem)] flex flex-col space-y-3">
+      {/* Alert Banner for Real-time Staff Notification */}
+      {activeAlert && (
+        <div className="bg-red-500/20 border border-red-500/50 text-red-300 px-4 py-2 rounded-xl flex items-center justify-between text-xs font-bold animate-pulse shadow-lg shadow-red-950/50">
+          <div className="flex items-center gap-2">
+            <BellRing className="size-4 text-red-400 animate-bounce" />
+            <span>{activeAlert}</span>
+          </div>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setActiveAlert(null)}
+            className="h-6 text-[10px] text-red-300 hover:text-white hover:bg-red-500/30"
+          >
+            Dismiss
+          </Button>
+        </div>
+      )}
+
+      {/* Header Bar */}
+      <div className="flex items-center justify-between shrink-0">
         <div>
-          <h1 className="text-2xl font-black tracking-tight text-white flex items-center gap-2">
+          <h1 className="text-xl md:text-2xl font-black tracking-tight text-white flex items-center gap-2">
             <MessagesSquare className="size-6 text-emerald-400" />
             WhatsApp Operations Inbox
           </h1>
@@ -227,25 +301,39 @@ export default function ConversationsInboxPage() {
             Live multi-staff customer chat, instant human takeover, and automated AI handoff.
           </p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => {
-            loadConversations();
-            if (selectedConvId) loadMessages(selectedConvId);
-          }}
-          className="border-neutral-800 bg-neutral-900 text-neutral-300 text-xs h-8"
-        >
-          <RefreshCw className="size-3.5 mr-1.5" />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setSoundEnabled(!soundEnabled)}
+            className={`text-xs h-8 border-neutral-800 ${
+              soundEnabled ? "bg-neutral-900 text-emerald-400" : "bg-neutral-950 text-neutral-500"
+            }`}
+            title={soundEnabled ? "Sound Alerts Enabled" : "Sound Alerts Muted"}
+          >
+            {soundEnabled ? <Volume2 className="size-3.5 mr-1" /> : <VolumeX className="size-3.5 mr-1" />}
+            {soundEnabled ? "Alerts On" : "Muted"}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              loadConversations();
+              if (selectedConvId) loadMessages(selectedConvId);
+            }}
+            className="border-neutral-800 bg-neutral-900 text-neutral-300 text-xs h-8 hover:bg-neutral-800"
+          >
+            <RefreshCw className="size-3.5 mr-1.5" />
+            Refresh
+          </Button>
+        </div>
       </div>
 
-      {/* 3-Pane Layout */}
-      <div className="flex-1 grid grid-cols-1 md:grid-cols-12 gap-3 min-h-0">
-        {/* LEFT PANE: Conversation List (3.5 cols) */}
-        <Card className="md:col-span-4 lg:col-span-3.5 bg-neutral-900/80 border-neutral-800 flex flex-col min-h-0">
-          <CardHeader className="p-3 border-b border-neutral-800 space-y-2.5">
+      {/* 3-Pane Full-Width Resilient Flexbox Layout */}
+      <div className="flex-1 flex flex-col md:flex-row gap-3 min-h-0 min-h-[calc(100vh-120px)] overflow-hidden">
+        {/* LEFT PANE: Fixed Width Sidebar (w-80 / 320px) */}
+        <Card className="w-full md:w-80 shrink-0 bg-neutral-900/80 border-neutral-800 flex flex-col h-full min-h-0 overflow-hidden">
+          <CardHeader className="p-3 border-b border-neutral-800 space-y-2.5 shrink-0">
             {/* Search */}
             <div className="relative">
               <Search className="size-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-neutral-500" />
@@ -256,7 +344,7 @@ export default function ConversationsInboxPage() {
                 className="pl-8 bg-neutral-950 border-neutral-800 text-xs h-8 text-neutral-200 placeholder:text-neutral-600"
               />
             </div>
-            {/* Status Tabs */}
+            {/* Status Filter Tabs */}
             <div className="flex gap-1">
               {[
                 { key: "ALL", label: "ALL" },
@@ -278,7 +366,7 @@ export default function ConversationsInboxPage() {
             </div>
           </CardHeader>
 
-          {/* Conversation list */}
+          {/* Conversation List Container */}
           <CardContent className="p-0 flex-1 overflow-y-auto divide-y divide-neutral-800/60 scroll-slim">
             {loadingList && conversations.length === 0 && (
               <p className="p-8 text-center text-xs text-neutral-500">Loading chats...</p>
@@ -294,12 +382,30 @@ export default function ConversationsInboxPage() {
                 <button
                   key={c.id ? `${c.id}-${cIdx}` : `conv-${cIdx}`}
                   onClick={() => setSelectedConvId(c.id)}
-                  className={`w-full p-3 text-left transition-colors flex items-start gap-2.5 ${
-                    isSelected ? "bg-neutral-800/80 border-l-2 border-amber-500" : "hover:bg-neutral-800/30"
+                  className={`w-full p-3 text-left transition-all flex items-start gap-2.5 relative ${
+                    isHumanHandling
+                      ? isSelected
+                        ? "bg-red-950/40 border-l-4 border-red-500"
+                        : "bg-red-950/20 hover:bg-red-950/30 border-l-2 border-red-500/50"
+                      : isSelected
+                      ? "bg-neutral-800/80 border-l-4 border-amber-500"
+                      : "hover:bg-neutral-800/30"
                   }`}
                 >
-                  <div className="size-9 rounded-xl bg-neutral-800 border border-neutral-700 flex items-center justify-center text-emerald-400 shrink-0 font-bold text-xs">
-                    {c.customerName ? c.customerName.charAt(0).toUpperCase() : <Phone className="size-4" />}
+                  <div
+                    className={`size-9 rounded-xl border flex items-center justify-center shrink-0 font-bold text-xs ${
+                      isHumanHandling
+                        ? "bg-red-500/20 border-red-500/40 text-red-400"
+                        : "bg-neutral-800 border-neutral-700 text-emerald-400"
+                    }`}
+                  >
+                    {isHumanHandling ? (
+                      <Headphones className="size-4 animate-pulse text-red-400" />
+                    ) : c.customerName ? (
+                      c.customerName.charAt(0).toUpperCase()
+                    ) : (
+                      <Phone className="size-4" />
+                    )}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between gap-1">
@@ -315,16 +421,16 @@ export default function ConversationsInboxPage() {
                     </p>
                     <div className="flex items-center justify-between gap-1.5 mt-1.5">
                       <span
-                        className={`text-[9px] font-bold px-1.5 py-0.2 rounded border uppercase tracking-wider ${
+                        className={`text-[9px] font-bold px-1.5 py-0.5 rounded border uppercase tracking-wider ${
                           isHumanHandling
-                            ? "bg-amber-500/15 text-amber-400 border-amber-500/30 font-bold"
+                            ? "bg-red-500/20 text-red-400 border-red-500/40 animate-pulse font-extrabold"
                             : "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
                         }`}
                       >
-                        {isHumanHandling ? "👤 Human Active" : "🤖 AI Active"}
+                        {isHumanHandling ? "🚨 HUMAN SUPPORT REQUESTED" : "🤖 AI Active"}
                       </span>
                       {c.unreadCount > 0 && (
-                        <span className="size-4 rounded-full bg-amber-500 text-neutral-950 font-black text-[9px] flex items-center justify-center">
+                        <span className="size-4 rounded-full bg-amber-500 text-neutral-950 font-black text-[9px] flex items-center justify-center shrink-0">
                           {c.unreadCount}
                         </span>
                       )}
@@ -336,37 +442,47 @@ export default function ConversationsInboxPage() {
           </CardContent>
         </Card>
 
-        {/* MIDDLE PANE: Active Chat Thread & Reply (5.5 cols) */}
-        <Card className="md:col-span-8 lg:col-span-5.5 bg-neutral-900/90 border-neutral-800 flex flex-col min-h-0">
+        {/* MIDDLE PANE: Main Chat Panel (Takes full remaining width & height) */}
+        <Card className="flex-1 min-w-0 h-full min-h-0 bg-neutral-900/90 border-neutral-800 flex flex-col overflow-hidden">
           {selectedConv ? (
             <>
-              {/* Chat Header with Human Takeover Controls */}
-              <div className="p-3 border-b border-neutral-800 flex items-center justify-between bg-neutral-950/40">
-                <div className="flex items-center gap-2.5">
-                  <div className="size-8 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center justify-center font-bold text-xs">
-                    WA
+              {/* Chat Header with Real-Time Takeover State */}
+              <div className="p-3 border-b border-neutral-800 flex items-center justify-between bg-neutral-950/40 shrink-0">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div
+                    className={`size-9 rounded-xl border flex items-center justify-center font-bold text-xs shrink-0 ${
+                      selectedConv.status === "PENDING"
+                        ? "bg-red-500/20 text-red-400 border-red-500/40"
+                        : "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                    }`}
+                  >
+                    {selectedConv.status === "PENDING" ? <Headphones className="size-4" /> : "WA"}
                   </div>
-                  <div>
-                    <h3 className="text-xs font-bold text-white flex items-center gap-2">
-                      {selectedConv.customerName || selectedConv.customerPhone}
-                      {selectedConv.status === "PENDING" && (
-                        <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30 font-bold">
-                          👤 HUMAN ACTIVE
+                  <div className="min-w-0">
+                    <h3 className="text-xs font-bold text-white flex items-center gap-2 truncate">
+                      <span>{selectedConv.customerName || selectedConv.customerPhone}</span>
+                      {selectedConv.status === "PENDING" ? (
+                        <span className="text-[9px] px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/40 font-black animate-pulse uppercase">
+                          👤 HUMAN TAKEOVER ACTIVE
+                        </span>
+                      ) : (
+                        <span className="text-[9px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 font-bold uppercase">
+                          🤖 AI ASSISTANT RUNNING
                         </span>
                       )}
                     </h3>
-                    <p className="text-[10px] text-neutral-400 font-mono">{selectedConv.customerPhone}</p>
+                    <p className="text-[10px] text-neutral-400 font-mono truncate">{selectedConv.customerPhone}</p>
                   </div>
                 </div>
 
                 {/* Handoff Toggle Button */}
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 shrink-0">
                   {selectedConv.status === "PENDING" ? (
                     <Button
                       size="sm"
                       onClick={() => handleToggleTakeover("OPEN")}
                       disabled={togglingStatus}
-                      className="h-8 text-[11px] bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-600/30 font-bold"
+                      className="h-8 text-[11px] bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-500/40 font-bold shadow-md shadow-emerald-950/50"
                     >
                       <Bot className="size-3.5 mr-1.5" />
                       RESUME AI
@@ -376,7 +492,7 @@ export default function ConversationsInboxPage() {
                       size="sm"
                       onClick={() => handleToggleTakeover("PENDING")}
                       disabled={togglingStatus}
-                      className="h-8 text-[11px] bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 border border-amber-500/30 font-bold"
+                      className="h-8 text-[11px] bg-amber-500 hover:bg-amber-600 text-neutral-950 border border-amber-400/40 font-bold shadow-md shadow-amber-950/50"
                     >
                       <UserCheck className="size-3.5 mr-1.5" />
                       TAKE OVER CHAT
@@ -385,8 +501,11 @@ export default function ConversationsInboxPage() {
                 </div>
               </div>
 
-              {/* Message Thread History */}
-              <div className="flex-1 overflow-y-auto p-4 space-y-3.5 scroll-slim bg-neutral-950/20">
+              {/* Message Thread History Container (Expanded, Full Height Scroll) */}
+              <div
+                className="flex-1 h-full min-h-0 overflow-y-auto p-4 flex flex-col space-y-3.5 scroll-slim bg-neutral-950/30"
+                style={{ display: "flex", flexDirection: "column" }}
+              >
                 {loadingMessages && messages.length === 0 && (
                   <p className="text-center text-xs text-neutral-500 py-12">Loading messages...</p>
                 )}
@@ -398,7 +517,7 @@ export default function ConversationsInboxPage() {
                   return (
                     <div
                       key={m.id ? `${m.id}-${idx}` : `msg-${idx}`}
-                      className={`flex flex-col ${isUser ? "items-start" : "items-end"}`}
+                      className={`flex flex-col w-full ${isUser ? "items-start" : "items-end"}`}
                     >
                       <div className="flex items-center gap-1.5 mb-1 px-1">
                         {isUser && <span className="text-[10px] font-bold text-neutral-400">Customer</span>}
@@ -427,7 +546,7 @@ export default function ConversationsInboxPage() {
                       </div>
 
                       <div
-                        className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-xs whitespace-pre-wrap leading-relaxed shadow-sm ${
+                        className={`max-w-[85%] md:max-w-[75%] rounded-2xl px-4 py-2.5 text-xs whitespace-pre-wrap leading-relaxed shadow-sm ${
                           isUser
                             ? "bg-neutral-800 text-neutral-100 rounded-tl-sm border border-neutral-700/60"
                             : isAssistant
@@ -444,48 +563,48 @@ export default function ConversationsInboxPage() {
               </div>
 
               {/* Quick Reply Chips */}
-              <div className="px-3 pt-2 pb-1 border-t border-neutral-800 bg-neutral-950/40 flex items-center gap-1.5 overflow-x-auto scroll-slim">
+              <div className="px-3 pt-2 pb-1 border-t border-neutral-800 bg-neutral-950/40 flex items-center gap-1.5 overflow-x-auto scroll-slim shrink-0">
                 <button
                   type="button"
                   onClick={() => handleQuickReply("Assalam-o-Alaikum! Main A-ONE Restaurant team se baat kar raha hoon. Main aap ki kya madad kar sakta hoon?")}
-                  className="px-2.5 py-1 rounded-lg text-[10px] font-semibold bg-neutral-800 text-neutral-300 hover:bg-neutral-700 whitespace-nowrap"
+                  className="px-2.5 py-1 rounded-lg text-[10px] font-semibold bg-neutral-800 text-neutral-300 hover:bg-neutral-700 whitespace-nowrap transition"
                 >
                   👋 Staff Salam
                 </button>
                 <button
                   type="button"
                   onClick={() => handleQuickReply("Aap ka order kitchen mein prepare ho raha hai aur jald delivery ke liye dispatch hoga. 🛵")}
-                  className="px-2.5 py-1 rounded-lg text-[10px] font-semibold bg-neutral-800 text-neutral-300 hover:bg-neutral-700 whitespace-nowrap"
+                  className="px-2.5 py-1 rounded-lg text-[10px] font-semibold bg-neutral-800 text-neutral-300 hover:bg-neutral-700 whitespace-nowrap transition"
                 >
                   🍳 Kitchen Update
                 </button>
                 <button
                   type="button"
                   onClick={() => handleQuickReply("Aap ki payment verify ho gayi hai. Shukriya! ✅")}
-                  className="px-2.5 py-1 rounded-lg text-[10px] font-semibold bg-neutral-800 text-neutral-300 hover:bg-neutral-700 whitespace-nowrap"
+                  className="px-2.5 py-1 rounded-lg text-[10px] font-semibold bg-neutral-800 text-neutral-300 hover:bg-neutral-700 whitespace-nowrap transition"
                 >
                   💳 Payment Received
                 </button>
                 <button
                   type="button"
                   onClick={() => handleQuickReply("Baraye meherbani apna mukammal delivery address share kar dein.")}
-                  className="px-2.5 py-1 rounded-lg text-[10px] font-semibold bg-neutral-800 text-neutral-300 hover:bg-neutral-700 whitespace-nowrap"
+                  className="px-2.5 py-1 rounded-lg text-[10px] font-semibold bg-neutral-800 text-neutral-300 hover:bg-neutral-700 whitespace-nowrap transition"
                 >
                   📍 Ask Address
                 </button>
               </div>
 
-              {/* Reply Box */}
-              <form onSubmit={handleSendReply} className="p-3 bg-neutral-950/60 flex gap-2">
+              {/* Reply Form */}
+              <form onSubmit={handleSendReply} className="p-3 bg-neutral-950/60 border-t border-neutral-800/80 flex gap-2 shrink-0">
                 <Input
                   value={replyText}
                   onChange={(e) => setReplyText(e.target.value)}
                   placeholder={
                     selectedConv.status === "PENDING"
-                      ? "Type reply to customer (Staff Direct WhatsApp Mode)..."
-                      : "Type reply (Sending will automatically activate Human mode)..."
+                      ? "Type reply to customer (Direct WhatsApp Message)..."
+                      : "Type reply (Sending will automatically activate Human Takeover)..."
                   }
-                  className="bg-neutral-900 border-neutral-800 text-xs text-neutral-100 placeholder:text-neutral-500 focus-visible:ring-emerald-500/50 h-10"
+                  className="bg-neutral-900 border-neutral-800 text-xs text-neutral-100 placeholder:text-neutral-500 focus-visible:ring-emerald-500/50 h-10 flex-1"
                 />
                 <Button
                   type="submit"
@@ -504,9 +623,9 @@ export default function ConversationsInboxPage() {
           )}
         </Card>
 
-        {/* RIGHT PANE: Customer Context & Real Order History (3 cols) */}
-        <Card className="hidden lg:flex lg:col-span-3 bg-neutral-900/80 border-neutral-800 flex-col min-h-0">
-          <CardHeader className="p-3.5 border-b border-neutral-800">
+        {/* RIGHT PANE: Customer Context & Real Order History (w-80 / 320px) */}
+        <Card className="hidden xl:flex w-80 shrink-0 bg-neutral-900/80 border-neutral-800 flex-col h-full min-h-0 overflow-hidden">
+          <CardHeader className="p-3.5 border-b border-neutral-800 shrink-0">
             <CardTitle className="text-xs font-bold text-white flex items-center gap-1.5">
               <User className="size-3.5 text-amber-500" />
               Customer Profile & History
@@ -522,9 +641,9 @@ export default function ConversationsInboxPage() {
                       {selectedConv.customerName || "Customer (WhatsApp)"}
                     </p>
                     <span
-                      className={`text-[9px] font-bold px-1.5 py-0.2 rounded border uppercase tracking-wider ${
+                      className={`text-[9px] font-bold px-1.5 py-0.5 rounded border uppercase tracking-wider ${
                         selectedConv.status === "PENDING"
-                          ? "bg-amber-500/15 text-amber-400 border-amber-500/30"
+                          ? "bg-red-500/20 text-red-400 border-red-500/40 animate-pulse font-extrabold"
                           : "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
                       }`}
                     >
@@ -571,11 +690,9 @@ export default function ConversationsInboxPage() {
                             </span>
                           </div>
                           <div className="flex items-center justify-between text-[10px]">
-                            <span className="text-neutral-400">
-                              {ord.status}
-                            </span>
+                            <span className="text-neutral-400">{ord.status}</span>
                             <span
-                              className={`px-1.5 py-0.2 rounded font-semibold text-[9px] uppercase ${
+                              className={`px-1.5 py-0.5 rounded font-semibold text-[9px] uppercase ${
                                 ord.paymentStatus === "PAID"
                                   ? "bg-emerald-500/15 text-emerald-400"
                                   : ord.paymentStatus === "PENDING_VERIFICATION"
@@ -610,7 +727,7 @@ export default function ConversationsInboxPage() {
                     onClick={() => {
                       window.open(`https://wa.me/${selectedConv.customerPhone.replace(/\+/g, "")}`, "_blank");
                     }}
-                    className="w-full text-xs justify-start border-neutral-800 bg-neutral-950 text-neutral-200"
+                    className="w-full text-xs justify-start border-neutral-800 bg-neutral-950 text-neutral-200 hover:bg-neutral-800"
                   >
                     <ExternalLink className="size-3.5 mr-2 text-emerald-400" />
                     Open in WhatsApp App
